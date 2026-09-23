@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>ClipDows</title>
+<link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup" id="popup">
+    <header class="popup-header">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="3" width="14" height="18" rx="3" stroke="url(#g1)" stroke-width="1.6"/>
+          <path d="M9 2.5h4a1 1 0 0 1 1 1V5H8V3.5a1 1 0 0 1 1-1Z" fill="url(#g1)"/>
+          <path d="M14 14c1.8-1.6 4-1.4 5.2.3M19.2 14.3v-2.1M19.2 14.3h-2.1" stroke="url(#g1)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="g1" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#6EE7F9"/>
+              <stop offset="1" stop-color="#8B5CF6"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>ClipDows</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="expandBtn" title="Open dashboard">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon-btn" id="closeBtn" title="Close (Esc)">✕</button>
+      </div>
+    </header>
+
+    <div class="search-row">
+      <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none">
+        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <input id="searchInput" type="text" placeholder="Search clipboard…" autofocus />
+      <span class="kbd-hint">/</span>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-type="all">All</button>
+      <button class="tab" data-type="text">Text</button>
+      <button class="tab" data-type="link">Links</button>
+      <button class="tab" data-type="image">Images</button>
+      <button class="tab" data-type="code">Code</button>
+      <button class="tab" data-type="file">Files</button>
+      <button class="tab" data-type="snippet">Snippets</button>
+    </div>
+
+    <div class="list" id="list">
+      <div class="empty-state" id="emptyState" hidden>
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none"><rect x="5" y="4" width="14" height="17" rx="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1Z" fill="currentColor"/></svg>
+        </div>
+        <p>Clipboard is empty</p>
+        <span>Start copying something and it'll appear here automatically.</span>
+      </div>
+    </div>
+
+    <footer class="popup-footer">
+      <span><kbd>1-5</kbd>Paste</span>
+      <span><kbd>↑↓</kbd>Navigate</span>
+      <span><kbd>Enter</kbd>Paste &amp; close</span>
+      <span><kbd>Esc</kbd>Close</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

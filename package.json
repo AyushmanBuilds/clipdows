@@ -1,0 +1,21 @@
+{
+  "name": "clipdows",
+  "productName": "ClipDows",
+  "version": "0.1.0",
+  "description": "Copy Anywhere. Access Everywhere. A cross-device clipboard manager for Windows.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild"
+  },
+  "author": "Ayushmanbuilds",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.0",
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^32.0.0"
+  }
+}
