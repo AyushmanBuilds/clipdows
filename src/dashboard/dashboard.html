@@ -2,122 +2,321 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>ClipDows Dashboard</title>
+<title>ClipDows</title>
+<link rel="icon" href="../../assets/tray-icon.png" />
 <link rel="stylesheet" href="dashboard.css" />
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 <body>
-  <div class="app">
+  <div class="drag-strip"></div>
+
+  <!-- ================= Onboarding ================= -->
+  <div class="onboarding" id="onboarding" hidden>
+    <div class="onboarding-card">
+      <img class="onboarding-logo" src="../../assets/tray-icon.png" alt="" width="64" height="64" />
+      <div class="onboarding-name">ClipDows</div>
+      <div class="onboarding-tag">Copy anywhere. Access everywhere.</div>
+      <h1>Your clipboard, everywhere you work.</h1>
+      <ul class="onboarding-points">
+        <li><i data-i="cloud"></i>Sync across all your devices</li>
+        <li><i data-i="shield"></i>Fast, secure and private</li>
+        <li><i data-i="zap"></i>Built for people who do more</li>
+      </ul>
+      <button class="oauth-btn" id="continueGoogle">
+        <span class="oauth-dot">G</span> Continue with Google
+      </button>
+      <div class="onboarding-or"><span>or use email</span></div>
+      <form class="auth-form" id="authForm" novalidate>
+        <input class="field" id="authName" type="text" placeholder="Your name" autocomplete="name" hidden />
+        <input class="field" id="authEmail" type="email" placeholder="Email" autocomplete="email" />
+        <input class="field" id="authPassword" type="password" placeholder="Password (min 6 characters)" autocomplete="current-password" />
+        <div class="auth-error" id="authError" hidden></div>
+        <button class="primary-btn wide" id="authSubmit" type="submit">Sign in</button>
+        <div class="auth-links">
+          <button class="link-btn" id="authToggle" type="button">Create a new account</button>
+          <button class="link-btn" id="authForgot" type="button">Forgot password?</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= Main App ================= -->
+  <div class="app" id="appRoot" hidden>
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="4" y="3" width="14" height="18" rx="3" stroke="url(#g1)" stroke-width="1.6"/>
-          <path d="M9 2.5h4a1 1 0 0 1 1 1V5H8V3.5a1 1 0 0 1 1-1Z" fill="url(#g1)"/>
-          <path d="M14 14c1.8-1.6 4-1.4 5.2.3M19.2 14.3v-2.1M19.2 14.3h-2.1" stroke="url(#g1)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-          <defs>
-            <linearGradient id="g1" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#6EE7F9"/><stop offset="1" stop-color="#8B5CF6"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img src="../../assets/tray-icon.png" alt="" width="28" height="28" />
         <span>ClipDows</span>
       </div>
 
       <nav class="nav-group" id="navGroup">
-        <button class="nav-item active" data-type="all">
-          <span class="nav-icon">🗂️</span><span>All Items</span><span class="nav-count" id="count-all">0</span>
-        </button>
-        <button class="nav-item" data-type="pinned">
-          <span class="nav-icon">📌</span><span>Pinned</span><span class="nav-count" id="count-pinned">0</span>
-        </button>
-        <button class="nav-item" data-type="text">
-          <span class="nav-icon">📝</span><span>Text</span><span class="nav-count" id="count-text">0</span>
-        </button>
-        <button class="nav-item" data-type="link">
-          <span class="nav-icon">🔗</span><span>Links</span><span class="nav-count" id="count-link">0</span>
-        </button>
-        <button class="nav-item" data-type="image">
-          <span class="nav-icon">🖼️</span><span>Images</span><span class="nav-count" id="count-image">0</span>
-        </button>
-        <button class="nav-item" data-type="code">
-          <span class="nav-icon">💻</span><span>Code</span><span class="nav-count" id="count-code">0</span>
-        </button>
-        <button class="nav-item" data-type="file">
-          <span class="nav-icon">📄</span><span>Files</span><span class="nav-count" id="count-file">0</span>
-        </button>
-        <button class="nav-item" data-type="snippet">
-          <span class="nav-icon">⭐</span><span>Snippets</span><span class="nav-count" id="count-snippet">0</span>
-        </button>
+        <button class="nav-item active" data-type="all"><i data-i="layers"></i><span>All Items</span><em id="count-all">0</em></button>
+        <button class="nav-item" data-type="pinned"><i data-i="pin"></i><span>Pinned</span><em id="count-pinned">0</em></button>
+        <button class="nav-item" data-type="text"><i data-i="text"></i><span>Text</span><em id="count-text">0</em></button>
+        <button class="nav-item" data-type="link"><i data-i="link"></i><span>Links</span><em id="count-link">0</em></button>
+        <button class="nav-item" data-type="image"><i data-i="image"></i><span>Images</span><em id="count-image">0</em></button>
+        <button class="nav-item" data-type="code"><i data-i="code"></i><span>Code</span><em id="count-code">0</em></button>
+        <button class="nav-item" data-type="file"><i data-i="file"></i><span>Files</span><em id="count-file">0</em></button>
+        <button class="nav-item" data-type="snippet"><i data-i="snippet"></i><span>Snippets</span><em id="count-snippet">0</em></button>
         <div class="nav-divider"></div>
-        <button class="nav-item" data-type="trash">
-          <span class="nav-icon">🗑️</span><span>Trash</span><span class="nav-count" id="count-trash">0</span>
-        </button>
+        <button class="nav-item" data-type="trash"><i data-i="trash"></i><span>Trash</span><em id="count-trash">0</em></button>
       </nav>
 
       <div class="sidebar-footer">
-        <div class="sync-pill">
-          <span class="dot"></span> Synced locally
-        </div>
+        <button class="sync-card" id="syncCard" title="Manage devices">
+          <span class="sync-icon"><i data-i="cloud"></i></span>
+          <span class="sync-text"><b>Syncing across devices</b><span id="syncSub">1 device online</span></span>
+        </button>
+        <button class="user-chip" id="userChip" title="Account settings">
+          <span class="user-avatar" id="userAvatar">AA</span>
+          <span class="user-info"><b id="userName">Your account</b><span id="userEmail"></span></span>
+        </button>
       </div>
     </aside>
 
     <main class="main">
-      <header class="main-header">
-        <div class="search-row">
-          <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none">
-            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-          <input id="searchInput" type="text" placeholder="Search your clipboard… (Ctrl+F)" />
-        </div>
-        <div class="view-toggle">
-          <button class="view-btn active" id="gridViewBtn" title="Grid view">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none"><rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
-          </button>
-          <button class="view-btn" id="listViewBtn" title="List view">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none"><path d="M5 6h14M5 12h14M5 18h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-        <button class="primary-btn" id="newSnippetBtn">+ New Snippet</button>
+      <header class="topbar">
+        <label class="search">
+          <i data-i="search"></i>
+          <input id="searchInput" type="text" placeholder="Search your clipboard…" />
+          <kbd>Ctrl F</kbd>
+        </label>
+        <button class="icon-btn" id="selectModeBtn" title="Select multiple (Ctrl+A)"><i data-i="checksq"></i></button>
+        <button class="primary-btn" id="newSnippetBtn"><i data-i="plus"></i>New Snippet</button>
+        <button class="icon-btn" id="openSettingsBtn" title="Settings"><i data-i="gear"></i></button>
       </header>
+
+      <div class="toolbar">
+        <div class="chips" id="chips">
+          <button class="chip active" data-type="all">All</button>
+          <button class="chip" data-type="text"><i data-i="text"></i>Text</button>
+          <button class="chip" data-type="link"><i data-i="link"></i>Links</button>
+          <button class="chip" data-type="image"><i data-i="image"></i>Images</button>
+          <button class="chip" data-type="code"><i data-i="code"></i>Code</button>
+          <button class="chip" data-type="file"><i data-i="file"></i>Files</button>
+          <button class="chip" data-type="snippet"><i data-i="snippet"></i>Snippets</button>
+        </div>
+        <select class="select" id="sortSelect" title="Sort">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+        <div class="seg">
+          <button class="seg-btn active" id="gridViewBtn" title="Grid view"><i data-i="grid"></i></button>
+          <button class="seg-btn" id="listViewBtn" title="List view"><i data-i="list"></i></button>
+        </div>
+      </div>
 
       <div class="content" id="content">
         <section class="pinned-section" id="pinnedSection">
-          <h3>⭐ Pinned</h3>
+          <div class="section-head"><h3><i data-i="snippet"></i>Pinned</h3></div>
           <div class="grid" id="pinnedGrid"></div>
         </section>
 
-        <section class="recent-section">
-          <h3 id="sectionTitle">Recent Items</h3>
+        <section>
+          <div class="section-head">
+            <h3 id="sectionTitle">Recent Items</h3>
+            <span class="section-count" id="sectionCount"></span>
+            <button class="ghost-btn danger sm" id="emptyTrashBtn" hidden><i data-i="trash"></i>Empty trash</button>
+          </div>
           <div class="grid" id="itemsGrid"></div>
           <div class="empty-state" id="emptyState" hidden>
-            <div class="empty-icon">📋</div>
-            <p>Nothing here yet</p>
-            <span>Copy something on your device — it'll show up instantly.</span>
+            <div class="empty-icon"><i data-i="paste"></i></div>
+            <p class="empty-title">Nothing here yet</p>
+            <span class="empty-sub">Copy something and it will show up here.</span>
           </div>
         </section>
+      </div>
+
+      <div class="selbar" id="selBar" hidden>
+        <span class="sel-count" id="selCount">0 selected</span>
+        <button class="sel-btn" id="selAll"><i data-i="checksq"></i>Select all</button>
+        <button class="sel-btn" id="selPin"><i data-i="pin"></i>Pin</button>
+        <button class="sel-btn" id="selRestore" hidden><i data-i="undo"></i>Restore</button>
+        <button class="sel-btn danger" id="selDelete"><i data-i="trash"></i>Delete</button>
+        <button class="sel-btn round" id="selCancel" title="Exit selection (Esc)"><i data-i="x"></i></button>
       </div>
     </main>
 
     <aside class="detail-panel" id="detailPanel" hidden>
       <div class="detail-header">
-        <button class="icon-btn" id="detailBack">←</button>
+        <button class="icon-btn flat" id="detailBack" title="Back"><i data-i="back"></i></button>
         <span class="detail-type-chip" id="detailTypeChip">Text</span>
-        <button class="icon-btn" id="detailClose">✕</button>
+        <span class="detail-meta" id="detailMeta"></span>
+        <button class="icon-btn flat" id="detailClose" title="Close"><i data-i="x"></i></button>
       </div>
-      <div class="detail-meta" id="detailMeta">22 Sep 2026, 10:24 AM</div>
-      <div class="detail-body" id="detailBody"></div>
+      <div class="detail-body" id="detailBody" contenteditable="false"></div>
       <div class="detail-count" id="detailCount"></div>
+
+      <div class="detail-tags">
+        <span class="detail-label">Tags</span>
+        <div class="tag-chips" id="tagChips"></div>
+        <button class="tag-add-btn" id="tagAddBtn">+ Add tag</button>
+        <input class="tag-input" id="tagInput" type="text" placeholder="Tag name, then Enter" hidden />
+      </div>
+
       <div class="detail-actions">
-        <button class="ghost-btn" id="detailCopy">Copy again</button>
-        <button class="primary-btn wide" id="detailPaste">Paste now</button>
+        <button class="ghost-btn" id="detailCopy"><i data-i="copy"></i>Copy again</button>
+        <button class="primary-btn" id="detailPaste"><i data-i="paste"></i>Paste now</button>
       </div>
       <div class="detail-tools">
-        <button class="tool-btn" id="detailPin">📌 Pin</button>
-        <button class="tool-btn danger" id="detailTrash">🗑 Delete</button>
+        <button class="tool-btn" id="detailEdit"><i data-i="edit"></i><span>Edit</span></button>
+        <button class="tool-btn" id="detailPin"><i data-i="pin"></i><span>Pin</span></button>
+        <button class="tool-btn" id="detailShare"><i data-i="share"></i><span>Share</span></button>
+        <button class="tool-btn danger" id="detailTrash"><i data-i="trash"></i><span>Delete</span></button>
       </div>
     </aside>
   </div>
 
+  <!-- ================= Settings ================= -->
+  <div class="modal-overlay" id="settingsModal" hidden>
+    <div class="modal settings-modal">
+      <nav class="set-nav" id="setNav">
+        <div class="set-title">Settings</div>
+        <button class="set-nav-item active" data-pane="general"><i data-i="gear"></i>General</button>
+        <button class="set-nav-item" data-pane="shortcuts"><i data-i="keyboard"></i>Shortcuts</button>
+        <button class="set-nav-item" data-pane="sync"><i data-i="cloud"></i>Sync &amp; Devices</button>
+        <button class="set-nav-item" data-pane="privacy"><i data-i="shield"></i>Privacy</button>
+        <button class="set-nav-item" data-pane="appearance"><i data-i="palette"></i>Appearance</button>
+        <button class="set-nav-item" data-pane="advanced"><i data-i="sliders"></i>Advanced</button>
+      </nav>
+
+      <div class="set-main">
+        <div class="set-head">
+          <h2 id="setHeading">General</h2>
+          <button class="icon-btn flat" id="settingsClose" title="Close"><i data-i="x"></i></button>
+        </div>
+        <div class="set-content settings-content">
+
+          <section class="set-pane" data-pane="general">
+            <div class="profile-card">
+              <span class="user-avatar lg" id="sUserAvatar">AA</span>
+              <div class="profile-info"><b id="sUserName">Your account</b><span id="sUserEmail"></span></div>
+              <button class="ghost-btn" id="signOutBtn"><i data-i="logout"></i>Sign out</button>
+            </div>
+            <div class="set-row"><div><b>Show app in system tray</b><span>Keep ClipDows one click away in the taskbar.</span></div><input class="switch" type="checkbox" data-setting="tray" /></div>
+            <div class="set-row"><div><b>Start on Windows startup</b><span>Open ClipDows in the background when you sign in.</span></div><input class="switch" type="checkbox" data-setting="startup" /></div>
+            <div class="set-row"><div><b>Play sound on new item</b><span>A soft tone whenever something is captured.</span></div><input class="switch" type="checkbox" data-setting="sound" /></div>
+            <div class="set-row"><div><b>Default view</b><span>How your items are laid out.</span></div>
+              <select class="select" data-setting="view"><option value="grid">Grid</option><option value="list">List</option></select></div>
+          </section>
+
+          <section class="set-pane" data-pane="shortcuts" hidden>
+            <div class="kbd-row"><span>Show or hide ClipDows</span><span><kbd>Caps Lock</kbd> or <kbd>Ctrl</kbd> <kbd>Space</kbd></span></div>
+            <div class="kbd-row"><span>Search</span><span><kbd>Ctrl</kbd> <kbd>F</kbd></span></div>
+            <div class="kbd-row"><span>Select all visible items</span><span><kbd>Ctrl</kbd> <kbd>A</kbd></span></div>
+            <div class="kbd-row"><span>Add or remove one item from selection</span><span><kbd>Ctrl</kbd> + click</span></div>
+            <div class="kbd-row"><span>Select a range of items</span><span><kbd>Shift</kbd> + click</span></div>
+            <div class="kbd-row"><span>Delete selected items</span><span><kbd>Delete</kbd></span></div>
+            <div class="kbd-row"><span>Close panel or leave selection</span><span><kbd>Esc</kbd></span></div>
+          </section>
+
+          <section class="set-pane" data-pane="sync" hidden>
+            <div class="set-row"><div><b>Real-time sync</b><span>Everything you copy reaches your paired phones instantly.</span></div><span class="badge ok">On</span></div>
+            <div class="set-row"><div><b>Connected devices</b><span id="syncPaneSub">1 device connected</span></div><button class="ghost-btn" id="manageDevicesBtn"><i data-i="monitor"></i>Manage devices</button></div>
+          </section>
+
+          <section class="set-pane" data-pane="privacy" hidden>
+            <div class="set-row"><div><b>Clear history</b><span>Moves every unpinned item to Trash. You can still restore them.</span></div><button class="ghost-btn danger" id="clearHistoryBtn">Clear history</button></div>
+            <div class="set-row"><div><b>Empty trash</b><span>Permanently deletes everything in Trash.</span></div><button class="ghost-btn danger" id="emptyTrashSettingsBtn">Empty trash</button></div>
+            <div class="set-row"><div><b>Local storage</b><span>Your clipboard history is stored on this computer and synced only to devices you paired.</span></div></div>
+          </section>
+
+          <section class="set-pane" data-pane="appearance" hidden>
+            <h4>Theme</h4>
+            <p class="set-hint">Choose how ClipDows looks on your device.</p>
+            <div class="theme-row">
+              <label class="theme-card"><input type="radio" name="theme" value="light" /><span class="theme-prev prev-light"></span><span class="theme-label">Light</span></label>
+              <label class="theme-card"><input type="radio" name="theme" value="dark" /><span class="theme-prev prev-dark"></span><span class="theme-label">Dark</span></label>
+              <label class="theme-card"><input type="radio" name="theme" value="system" /><span class="theme-prev prev-system"></span><span class="theme-label">System</span></label>
+            </div>
+            <h4>Accent color</h4>
+            <div class="accent-row" id="accentRow">
+              <button class="accent-swatch" data-a1="#4F8DF7" data-a2="#3B6CF0" style="background:linear-gradient(135deg,#4F8DF7,#3B6CF0)" title="Blue"></button>
+              <button class="accent-swatch" data-a1="#C084FC" data-a2="#8B5CF6" style="background:linear-gradient(135deg,#C084FC,#8B5CF6)" title="Purple"></button>
+              <button class="accent-swatch" data-a1="#38BDF8" data-a2="#0EA5E9" style="background:linear-gradient(135deg,#38BDF8,#0EA5E9)" title="Sky"></button>
+              <button class="accent-swatch" data-a1="#2DD4BF" data-a2="#0D9488" style="background:linear-gradient(135deg,#2DD4BF,#0D9488)" title="Teal"></button>
+              <button class="accent-swatch" data-a1="#4ADE80" data-a2="#16A34A" style="background:linear-gradient(135deg,#4ADE80,#16A34A)" title="Green"></button>
+              <button class="accent-swatch" data-a1="#FB923C" data-a2="#F97316" style="background:linear-gradient(135deg,#FB923C,#F97316)" title="Orange"></button>
+              <button class="accent-swatch" data-a1="#F472B6" data-a2="#E11D74" style="background:linear-gradient(135deg,#F472B6,#E11D74)" title="Pink"></button>
+            </div>
+            <div class="set-row"><div><b>Compact cards</b><span>Fit more items on screen.</span></div><input class="switch" type="checkbox" data-setting="compact" /></div>
+          </section>
+
+          <section class="set-pane" data-pane="advanced" hidden>
+            <div class="set-row"><div><b>Export your data</b><span>Save all active items as a JSON file.</span></div><button class="ghost-btn" id="exportBtn"><i data-i="download"></i>Export</button></div>
+            <div class="set-row"><div><b>About</b><span>ClipDows for Windows</span></div></div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Devices ================= -->
+  <div class="modal-overlay" id="devicesModal" hidden>
+    <div class="modal devices-modal">
+      <div class="modal-header">
+        <div><h2>Your Devices</h2><span class="devices-count" id="devicesCount">1 device connected</span></div>
+        <button class="icon-btn flat" id="devicesClose"><i data-i="x"></i></button>
+      </div>
+
+      <div id="devicesListView">
+        <div class="devices-body" id="devicesBody">
+          <div class="device-row" data-device="this">
+            <div class="device-icon"><i data-i="monitor"></i></div>
+            <div class="device-info"><b>This computer <span class="this-device">(This device)</span></b><span>Always synced</span></div>
+            <span class="badge ok">Active now</span>
+          </div>
+        </div>
+        <button class="primary-btn wide" id="addDeviceBtn"><i data-i="plus"></i>Add Device</button>
+      </div>
+
+      <div id="devicesPairView" hidden>
+        <div class="pair-body">
+          <div class="pair-qr-wrap"><img id="pairQrImg" class="pair-qr" alt="Scan to pair" /></div>
+          <p class="pair-hint">Open your phone's camera and scan this code.<br>It installs ClipDows as an app on Android, no Play Store needed.</p>
+          <p class="pair-status" id="pairStatus">Waiting for scan…</p>
+          <button class="ghost-btn" id="pairCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= New snippet ================= -->
+  <div class="modal-overlay" id="snippetModal" hidden>
+    <div class="modal small-modal">
+      <div class="modal-header"><h2>New snippet</h2><button class="icon-btn flat" id="snippetClose"><i data-i="x"></i></button></div>
+      <div class="form-stack">
+        <input class="field" id="snippetTitle" type="text" placeholder="Title, e.g. Email signature" />
+        <textarea class="field" id="snippetContent" rows="7" placeholder="Snippet text"></textarea>
+        <div class="modal-actions">
+          <button class="ghost-btn" id="snippetCancel">Cancel</button>
+          <button class="primary-btn" id="snippetSave">Save snippet</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Confirm ================= -->
+  <div class="modal-overlay" id="confirmModal" hidden>
+    <div class="modal small-modal confirm">
+      <h2 id="confirmTitle">Are you sure?</h2>
+      <p id="confirmMsg"></p>
+      <div class="modal-actions">
+        <button class="ghost-btn" id="confirmCancel">Cancel</button>
+        <button class="primary-btn" id="confirmOk">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" hidden>
+    <div class="toast-icon"><i data-i="check"></i></div>
+    <div class="toast-body"><b id="toastTitle"></b><span id="toastSub"></span></div>
+    <button class="toast-action" id="toastAction" hidden></button>
+  </div>
+
+  <script type="module" src="firebase-auth.js"></script>
+  <script type="module" src="firestoreSync.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

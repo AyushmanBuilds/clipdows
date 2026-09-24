@@ -43,6 +43,9 @@ function checkClipboard() {
     const sig = 'img:' + hashContent(dataUrl.slice(0, 5000));
     if (sig === lastSignature) return;
     lastSignature = sig;
+    // Nobody signed in: remember it as "seen" but store nothing. This also stops
+    // a newly signed-in account from inheriting whatever was on the clipboard.
+    if (!db.hasSession()) return;
 
     const item = {
       id: crypto.randomUUID(),
@@ -53,7 +56,7 @@ function checkClipboard() {
       created_at: Date.now(),
       updated_at: Date.now(),
     };
-    db.insertItem(item);
+    if (!db.insertItem(item)) return;
     if (onNewItemCallback) onNewItemCallback(item);
     return;
   }
@@ -64,6 +67,7 @@ function checkClipboard() {
   const sig = 'text:' + hashContent(text);
   if (sig === lastSignature) return;
   lastSignature = sig;
+  if (!db.hasSession()) return;
 
   if (db.isDuplicateOfLatest(text, detectType(text))) return;
 
@@ -77,7 +81,7 @@ function checkClipboard() {
     created_at: Date.now(),
     updated_at: Date.now(),
   };
-  db.insertItem(item);
+  if (!db.insertItem(item)) return;
   if (onNewItemCallback) onNewItemCallback(item);
 }
 
