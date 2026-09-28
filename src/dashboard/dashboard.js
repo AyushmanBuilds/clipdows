@@ -349,6 +349,7 @@ function upgradeToast(feature, max) {
 async function loadPlan() {
   try { planInfo = await window.clipdows.getPlan(); } catch (e) { planInfo = null; }
   applyPlanUI();
+  syncEntitlement(); // the server is the source of truth for paid plans
 }
 function applyPlanUI() {
   if (!planInfo) return;
@@ -414,7 +415,8 @@ function renderPricing() {
   const trial = !!(planInfo && planInfo.trial);
   const curIdx = PLAN_ORDER.indexOf(cur);
   const label = { free: 'Free', pro: trial ? 'Pro trial' : 'Pro', max: 'Max' }[cur];
-  $('pricingStatus').innerHTML = `Current plan: <b>${label}</b>` + (trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : '');
+  const paidNow = !!(planInfo && planInfo.paid && planInfo.paidUntil);
+  $('pricingStatus').innerHTML = `Current plan: <b>${label}</b>` + (trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : paidNow ? ` &middot; active until ${planDate(planInfo.paidUntil)}` : '');
 
   grid.innerHTML = PLAN_ORDER.map((t, i) => {
     const d = PLAN_DEFS[t];
@@ -427,12 +429,13 @@ function renderPricing() {
     if (isCur) btn = `<button class="plan-btn cur" disabled><i data-i="check"></i>Current</button>`;
     else if (i < curIdx || (trial && t === 'free')) btn = `<button class="plan-btn dim" disabled>Included</button>`;
     else btn = `<button class="plan-btn ${t === 'max' ? 'gold' : 'buy'}" data-buy="${t}">Buy Now<span class="pb-price">&middot; &#8377;${d.price} / month</span></button>`;
+    const renew = isCur && paidNow && t !== 'free' ? `<button class="plan-renew" data-buy="${t}">Extend by 30 days &middot; &#8377;${d.price}</button>` : '';
     return `<article class="plan-card ${t === 'pro' ? 'featured' : ''} ${t}">${flag}
       <div class="plan-head"><span class="plan-ico"><i data-i="${d.icon}"></i></span><div><div class="plan-name">${d.name}</div><div class="plan-tag">${d.tag}</div></div></div>
       <div class="plan-price"><span class="plan-amt"><small>&#8377;</small>${d.price}</span><span class="plan-per">${d.price ? '/ month' : 'forever'}</span></div>
       <div class="plan-rule"></div>
       <ul class="plan-feats">${d.feats.map((f) => `<li><i data-i="check"></i><span>${f}</span></li>`).join('')}</ul>
-      ${btn}</article>`;
+      ${btn}${renew}</article>`;
   }).join('');
 
   const hi = (t) => (t === cur ? 'cmp-cur' : '');
@@ -442,11 +445,77 @@ function renderPricing() {
       g.rows.map((r) => `<div class="cmp-row"><span>${r[0]}</span>${cell(r[1], 'free')}${cell(r[2], 'pro')}${cell(r[3], 'max')}</div>`).join('')).join('');
   hydrate(grid); hydrate(table);
 }
-// Placeholder until the Razorpay step: if a checkout bridge exists it is used, otherwise a toast is shown.
-function startCheckout(tier) {
-  const d = PLAN_DEFS[tier]; if (!d) return;
-  if (window.clipdows && typeof window.clipdows.startCheckout === 'function') { window.clipdows.startCheckout(tier); return; }
-  showToast(`${d.name} plan \u00B7 \u20B9${d.price} / month`, 'Secure Razorpay checkout is coming soon.');
+// ---------- Razorpay checkout ----------
+// Orders and verification happen on Cloud Functions (see functions/index.js). Nothing secret lives here.
+let checkoutBusy = false;
+const planDate = (ms) => new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+function loadRazorpayJs() {
+  if (window.Razorpay) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Could not load Razorpay. Check your internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+function setCheckoutBusy(tier, on) {
+  document.querySelectorAll('[data-buy]').forEach((b) => {
+    b.disabled = on;
+    if (on && b.dataset.buy === tier && b.classList.contains('plan-btn')) b.innerHTML = '<span class="pay-spin"></span>Opening checkout\u2026';
+  });
+}
+/** Asks the server which paid plan this account has and mirrors it locally (clears it if there is none). */
+async function syncEntitlement() {
+  if (!window.clipPay) return;
+  try {
+    const e = await window.clipPay.getEntitlement();
+    const tier = e && e.tier ? e.tier : null;
+    if (tier || (planInfo && planInfo.paid)) {
+      planInfo = await window.clipdows.setPaidPlan({ tier, expiresAt: (e && e.paidUntil) || 0 });
+      applyPlanUI();
+    }
+  } catch (err) { /* offline, or functions not deployed yet: keep the local plan */ }
+}
+async function confirmPayment(r) {
+  const res = await window.clipPay.verifyPayment({ orderId: r.razorpay_order_id, paymentId: r.razorpay_payment_id, signature: r.razorpay_signature });
+  planInfo = await window.clipdows.setPaidPlan({ tier: res.tier, expiresAt: res.paidUntil });
+  applyPlanUI();
+  showToast(`Welcome to ${PLAN_DEFS[res.tier].name}`, `Your plan is active until ${planDate(res.paidUntil)}.`);
+}
+async function startCheckout(tier) {
+  const d = PLAN_DEFS[tier];
+  if (!d || checkoutBusy) return;
+  if (!window.clipPay) { showToast('Payments unavailable', 'Please restart ClipDows and try again.'); return; }
+  checkoutBusy = true; setCheckoutBusy(tier, true);
+  try {
+    await loadRazorpayJs();
+    const order = await window.clipPay.createOrder(tier);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-2').trim() || '#3B6CF0';
+    await new Promise((resolve) => {
+      const rzp = new window.Razorpay({
+        key: order.keyId, amount: order.amount, currency: order.currency, order_id: order.orderId,
+        name: 'ClipDows', description: `${d.name} plan \u00B7 30 days`,
+        prefill: { name: $('sUserName').textContent, email: $('sUserEmail').textContent },
+        theme: { color: accent },
+        handler: async (r) => {
+          try { await confirmPayment(r); }
+          catch (err) {
+            showToast('Payment received', 'We could not activate your plan yet. Restart ClipDows in a minute; if it stays locked, contact support.');
+            syncEntitlement();
+          }
+          resolve();
+        },
+        modal: { ondismiss: () => resolve() },
+      });
+      rzp.on('payment.failed', (r) => showToast('Payment failed', (r.error && r.error.description) || 'Please try again.'));
+      rzp.open();
+    });
+  } catch (err) {
+    showToast('Could not start payment', (err && err.message) || 'Please try again.');
+  } finally {
+    checkoutBusy = false; renderPricing();
+  }
 }
 $('planGrid').addEventListener('click', (e) => { const b = e.target.closest('[data-buy]'); if (b) startCheckout(b.dataset.buy); });
 $('viewPlansBtn').addEventListener('click', () => openSettings('pricing'));

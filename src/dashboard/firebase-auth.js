@@ -10,6 +10,7 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCM-ay_5E70skMszLlYziZgafrkQ25SWS8",
@@ -22,6 +23,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const functions = getFunctions(app, 'asia-south1'); // must match REGION in functions/index.js
 
 // Exported so firestoreSync.js (device pairing + real-time clipboard sync)
 // can reuse this same app/auth instance instead of re-initializing Firebase.
@@ -50,4 +52,11 @@ window.clipAuth = {
     signInWithCredential(auth, GoogleAuthProvider.credential(idToken, accessToken)),
   resetPassword: (email) => sendPasswordResetEmail(auth, email),
   signOut: () => signOut(auth),
+};
+
+// Payments (Razorpay). Every call runs on Cloud Functions — the Razorpay secret never reaches the app.
+window.clipPay = {
+  createOrder: async (tier) => (await httpsCallable(functions, 'createOrder')({ tier })).data,
+  verifyPayment: async (p) => (await httpsCallable(functions, 'verifyPayment')(p)).data,
+  getEntitlement: async () => (await httpsCallable(functions, 'getEntitlement')()).data,
 };

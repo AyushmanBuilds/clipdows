@@ -50,6 +50,7 @@ function info() {
   const t = tier();
   return {
     tier: t,
+    paid, paidUntil: paid ? state.paidUntil : 0,
     trial: t === 'pro' && !paid && !(!app.isPackaged && state.devTier),
     trialDaysLeft: trialDaysLeft(),
     limits: LIMITS[t],
