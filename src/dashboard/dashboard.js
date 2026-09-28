@@ -35,6 +35,7 @@ const PATHS = {
   download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 8l4 4-4 4M19 12H9"/>',
   zap: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
+  crown: '<path d="m3 8 4.5 4L12 5l4.5 7L21 8l-2 11H5z"/><path d="M5 19h14"/>',
 };
 const svg = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${PATHS[n] || ''}</svg>`;
 function hydrate(root = document) { root.querySelectorAll('i[data-i]').forEach((el) => { el.innerHTML = svg(el.dataset.i); }); }
@@ -368,11 +369,87 @@ function applyPlanUI() {
   $('snippetTrigger').placeholder = can ? 'Trigger, e.g. ;addr  (optional)' : 'Trigger & variables — Max plan';
   $('snippetVarsHint').hidden = false;
   $('timeMachineBtn').classList.toggle('plan-locked', !planInfo.limits.timeMachine);
+  renderPricing();
   applySettings(); // re-send plan-gated settings (ignored apps, secret expiry) to the main process
   if (!appRoot.hidden) refresh();
 }
 window.clipdows.onPlanChanged((info) => { planInfo = info; applyPlanUI(); });
 $('devPlanSel').addEventListener('change', async (e) => { planInfo = await window.clipdows.setDevPlan(e.target.value); applyPlanUI(); });
+
+// ---------- pricing tab ----------
+const PLAN_ORDER = ['free', 'pro', 'max'];
+const PLAN_DEFS = {
+  free: { name: 'Free', price: 0, icon: 'layers', tag: 'Everything you need to get started.',
+    feats: ['100 clips of history', '5 pins and 10 snippets', '1 linked phone', 'Sensitive-data guard', 'Basic instant actions'] },
+  pro: { name: 'Pro', price: 99, icon: 'zap', tag: 'For people who live in their clipboard.',
+    feats: ['1,000 clips of history', 'Unlimited pins and paste stack', '3 linked phones with image sync', 'All instant actions and data export', 'Unlimited screenshot search'] },
+  max: { name: 'Max', price: 199, icon: 'crown', tag: 'Every feature, no limits.',
+    feats: ['Everything in Pro', 'Unlimited history and snippets', '10 linked phones, 1,000 synced clips', 'Snippet triggers and variables', 'Time machine'] },
+};
+const PLAN_COMPARE = [
+  { group: 'History & storage', rows: [
+    ['Clipboard history', '100 clips', '1,000 clips', 'Unlimited'],
+    ['Pinned items', '5', 'Unlimited', 'Unlimited'],
+    ['Snippets', '10', '100', 'Unlimited'],
+    ['Paste stack', '5 items', 'Unlimited', 'Unlimited'],
+    ['Search inside screenshots', '5 / month', 'Unlimited', 'Unlimited'] ] },
+  { group: 'Sync & devices', rows: [
+    ['Linked phones', '1', '3', '10'],
+    ['Synced clips', '25', '200', '1,000'],
+    ['Image sync', false, true, true] ] },
+  { group: 'Productivity', rows: [
+    ['Instant actions', 'Basic', 'All actions', 'All actions'],
+    ['App filters and ignored apps', false, true, true],
+    ['Custom secret expiry', false, true, true],
+    ['Export your data', false, true, true] ] },
+  { group: 'Power tools', rows: [
+    ['Snippet variables', false, false, true],
+    ['Snippet triggers', false, false, true],
+    ['Time machine', false, false, true] ] },
+];
+function renderPricing() {
+  const grid = $('planGrid'), table = $('compareTable');
+  if (!grid || !table) return;
+  const cur = planInfo ? planInfo.tier : 'free';
+  const trial = !!(planInfo && planInfo.trial);
+  const curIdx = PLAN_ORDER.indexOf(cur);
+  const label = { free: 'Free', pro: trial ? 'Pro trial' : 'Pro', max: 'Max' }[cur];
+  $('pricingStatus').innerHTML = `Current plan: <b>${label}</b>` + (trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : '');
+
+  grid.innerHTML = PLAN_ORDER.map((t, i) => {
+    const d = PLAN_DEFS[t];
+    const isCur = t === cur && !(trial && t === 'pro');
+    const isTrial = trial && t === 'pro';
+    let flag = t === 'pro' ? '<span class="plan-flag">Most popular</span>' : '';
+    if (isCur) flag = '<span class="plan-flag cur">Your plan</span>';
+    if (isTrial) flag = `<span class="plan-flag">Trial &middot; ${plural(planInfo.trialDaysLeft, 'day')} left</span>`;
+    let btn;
+    if (isCur) btn = `<button class="plan-btn cur" disabled><i data-i="check"></i>Current</button>`;
+    else if (i < curIdx || (trial && t === 'free')) btn = `<button class="plan-btn dim" disabled>Included</button>`;
+    else btn = `<button class="plan-btn ${t === 'max' ? 'gold' : 'buy'}" data-buy="${t}">Buy Now<span class="pb-price">&middot; &#8377;${d.price} / month</span></button>`;
+    return `<article class="plan-card ${t === 'pro' ? 'featured' : ''} ${t}">${flag}
+      <div class="plan-head"><span class="plan-ico"><i data-i="${d.icon}"></i></span><div><div class="plan-name">${d.name}</div><div class="plan-tag">${d.tag}</div></div></div>
+      <div class="plan-price"><span class="plan-amt"><small>&#8377;</small>${d.price}</span><span class="plan-per">${d.price ? '/ month' : 'forever'}</span></div>
+      <div class="plan-rule"></div>
+      <ul class="plan-feats">${d.feats.map((f) => `<li><i data-i="check"></i><span>${f}</span></li>`).join('')}</ul>
+      ${btn}</article>`;
+  }).join('');
+
+  const hi = (t) => (t === cur ? 'cmp-cur' : '');
+  const cell = (v, t) => `<span class="${hi(t)}">${v === true ? '<i class="cmp-yes" data-i="check"></i>' : v === false ? '<em class="cmp-no">&mdash;</em>' : v}</span>`;
+  table.innerHTML = `<div class="cmp-row cmp-head"><span>Features</span>${PLAN_ORDER.map((t) => `<span class="${hi(t)}">${PLAN_DEFS[t].name}</span>`).join('')}</div>` +
+    PLAN_COMPARE.map((g) => `<div class="cmp-row cmp-group"><span>${g.group}</span></div>` +
+      g.rows.map((r) => `<div class="cmp-row"><span>${r[0]}</span>${cell(r[1], 'free')}${cell(r[2], 'pro')}${cell(r[3], 'max')}</div>`).join('')).join('');
+  hydrate(grid); hydrate(table);
+}
+// Placeholder until the Razorpay step: if a checkout bridge exists it is used, otherwise a toast is shown.
+function startCheckout(tier) {
+  const d = PLAN_DEFS[tier]; if (!d) return;
+  if (window.clipdows && typeof window.clipdows.startCheckout === 'function') { window.clipdows.startCheckout(tier); return; }
+  showToast(`${d.name} plan \u00B7 \u20B9${d.price} / month`, 'Secure Razorpay checkout is coming soon.');
+}
+$('planGrid').addEventListener('click', (e) => { const b = e.target.closest('[data-buy]'); if (b) startCheckout(b.dataset.buy); });
+$('viewPlansBtn').addEventListener('click', () => openSettings('pricing'));
 
 // ---------- source-app icons ----------
 const appIconCache = new Map();
@@ -850,12 +927,13 @@ function syncControls() {
 }
 darkMq.addEventListener('change', () => { if (settings.theme === 'system') applySettings(); });
 
-const PANE_TITLES = { general: 'General', shortcuts: 'Shortcuts', sync: 'Sync & Devices', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
+const PANE_TITLES = { general: 'General', pricing: 'Pricing', shortcuts: 'Shortcuts', sync: 'Sync & Devices', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
 function openSettings(pane = 'general') {
   syncControls();
   document.querySelectorAll('.set-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.pane === pane));
   document.querySelectorAll('.set-pane').forEach((p) => { p.hidden = p.dataset.pane !== pane; });
   $('setHeading').textContent = PANE_TITLES[pane];
+  document.querySelector('.settings-modal').classList.toggle('wide', pane === 'pricing');
   settingsModal.hidden = false;
 }
 $('openSettingsBtn').addEventListener('click', () => openSettings());
