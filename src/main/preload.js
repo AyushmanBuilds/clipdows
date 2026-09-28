@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('clipdows', {
   bulkItems: (action, ids) => ipcRenderer.invoke('items:bulk', { action, ids }),
   applySettings: (s) => ipcRenderer.send('settings:apply', s),
 
+  // User-configurable global show/hide shortcut (defaults to Alt)
+  getGlobalShortcut: () => ipcRenderer.invoke('shortcut:get'),
+  setGlobalShortcut: (accelerator) => ipcRenderer.invoke('shortcut:set', accelerator),
+
   googleSignIn: () => ipcRenderer.invoke('auth:google'),
   googleCancel: () => ipcRenderer.send('auth:googleCancel'),
   hidePopup: () => ipcRenderer.send('popup:hide'),

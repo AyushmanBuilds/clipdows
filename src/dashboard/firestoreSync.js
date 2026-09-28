@@ -236,6 +236,14 @@ export async function revokeDevice(phoneUid) {
   await deleteDoc(doc(db, 'users', currentUid, 'linkedDevices', phoneUid));
 }
 
+/** Sets a custom display name for an already-linked device (asked right after pairing succeeds). */
+export async function renameDevice(phoneUid, name) {
+  if (!currentUid) throw new Error('Not signed in yet.');
+  const clean = String(name || '').trim();
+  if (!clean) return;
+  await setDoc(doc(db, 'users', currentUid, 'linkedDevices', phoneUid), { name: clean }, { merge: true });
+}
+
 // dashboard.js is a plain (non-module) script, so expose everything it needs
 // on window rather than making it deal with ESM imports.
-window.clipSync = { startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice };
+window.clipSync = { startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };

@@ -200,7 +200,15 @@
           </section>
 
           <section class="set-pane" data-pane="shortcuts" hidden>
-            <div class="kbd-row"><span>Show or hide ClipDows</span><span><kbd>Caps Lock</kbd> or <kbd>Ctrl</kbd> <kbd>Space</kbd></span></div>
+            <div class="kbd-row">
+              <span>Show or hide ClipDows</span>
+              <span class="shortcut-edit">
+                <kbd id="shortcutDisplay">Alt</kbd>
+                <button class="ghost-btn sm" id="shortcutChangeBtn">Change</button>
+                <button class="ghost-btn sm" id="shortcutResetBtn" title="Reset to default (Alt)"><i data-i="undo"></i></button>
+              </span>
+            </div>
+            <p class="set-hint" id="shortcutHint">Click Change, then press the key or key combination you want to use instead.</p>
             <div class="kbd-row"><span>Search</span><span><kbd>Ctrl</kbd> <kbd>F</kbd></span></div>
             <div class="kbd-row"><span>Select all visible items</span><span><kbd>Ctrl</kbd> <kbd>A</kbd></span></div>
             <div class="kbd-row"><span>Add or remove one item from selection</span><span><kbd>Ctrl</kbd> + click</span></div>
@@ -263,7 +271,8 @@
         <div class="devices-body" id="devicesBody">
           <div class="device-row" data-device="this">
             <div class="device-icon"><i data-i="monitor"></i></div>
-            <div class="device-info"><b>This computer <span class="this-device">(This device)</span></b><span>Always synced</span></div>
+            <div class="device-info"><b id="thisDeviceLabel">This computer <span class="this-device">(This device)</span></b><span>Always synced</span></div>
+            <button class="icon-btn flat" id="renameThisDeviceBtn" title="Rename this computer"><i data-i="edit"></i></button>
             <span class="badge ok">Active now</span>
           </div>
         </div>
@@ -301,6 +310,7 @@
     <div class="modal small-modal confirm">
       <h2 id="confirmTitle">Are you sure?</h2>
       <p id="confirmMsg"></p>
+      <input class="field" id="confirmInput" type="text" hidden />
       <div class="modal-actions">
         <button class="ghost-btn" id="confirmCancel">Cancel</button>
         <button class="primary-btn" id="confirmOk">Confirm</button>

@@ -138,18 +138,55 @@ function createTray() {
   tray.on('click', togglePopup);
 }
 
-const PRIMARY_HOTKEY = 'CapsLock';
-const FALLBACK_HOTKEY = 'Control+Space';
+// Global show/hide shortcut. Defaults to Alt; users can change it themselves
+// from Settings -> Shortcuts once signed in. Their choice is device-level
+// (not tied to any one account) and persisted in shortcut.json so it's
+// re-applied on every launch.
+const DEFAULT_HOTKEY = 'Alt+C';
+const FALLBACK_HOTKEY = 'CapsLock';
+const SHORTCUT_PATH = path.join(app.getPath('userData'), 'shortcut.json');
+
+let currentHotkey = DEFAULT_HOTKEY;
+
+function loadSavedHotkey() {
+  try {
+    const raw = fs.readFileSync(SHORTCUT_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.accelerator === 'string' && parsed.accelerator.trim()) {
+      return parsed.accelerator.trim();
+    }
+  } catch { /* no saved shortcut yet, or file unreadable — fall back to default */ }
+  return DEFAULT_HOTKEY;
+}
+
+function saveHotkey(accelerator) {
+  try { fs.writeFileSync(SHORTCUT_PATH, JSON.stringify({ accelerator })); }
+  catch (err) { console.warn('[main] Failed to save shortcut preference:', err); }
+}
+
+/** (Re)registers `accelerator` as the global show/hide hotkey. Returns true/false. */
+function applyHotkey(accelerator) {
+  globalShortcut.unregisterAll();
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accelerator, togglePopup);
+  } catch (err) {
+    console.warn(`[main] Invalid accelerator "${accelerator}":`, err.message);
+    ok = false;
+  }
+  if (ok) {
+    currentHotkey = accelerator;
+    console.log(`[main] Registered hotkey: ${accelerator}`);
+  }
+  return ok;
+}
 
 function registerShortcuts() {
-  const primaryOk = globalShortcut.register(PRIMARY_HOTKEY, togglePopup);
-  if (primaryOk) {
-    console.log(`[main] Registered hotkey: ${PRIMARY_HOTKEY}`);
-    return;
-  }
-  console.warn(`[main] Failed to register ${PRIMARY_HOTKEY}, trying fallback ${FALLBACK_HOTKEY}`);
-  const fallbackOk = globalShortcut.register(FALLBACK_HOTKEY, togglePopup);
-  if (fallbackOk) {
+  currentHotkey = loadSavedHotkey();
+  if (applyHotkey(currentHotkey)) return;
+
+  console.warn(`[main] Failed to register ${currentHotkey}, trying fallback ${FALLBACK_HOTKEY}`);
+  if (applyHotkey(FALLBACK_HOTKEY)) {
     console.log(`[main] Registered fallback hotkey: ${FALLBACK_HOTKEY}`);
   } else {
     console.warn(`[main] Failed to register fallback hotkey ${FALLBACK_HOTKEY} too. Use the tray icon to open ClipDows.`);
@@ -328,4 +365,21 @@ ipcMain.handle('cloud:itemReceived', (_evt, item) => {
 ipcMain.handle('cloud:deviceLinked', (_evt, device) => {
   if (dashboardWindow) dashboardWindow.webContents.send('devices:updated', device);
   return { ok: true };
+});
+
+// ---------- Global shortcut (user-configurable, default Alt) ----------
+ipcMain.handle('shortcut:get', () => ({ accelerator: currentHotkey, default: DEFAULT_HOTKEY }));
+
+ipcMain.handle('shortcut:set', (_evt, accelerator) => {
+  const next = String(accelerator || '').trim();
+  if (!next) return { ok: false, error: 'Choose a key or combination first.' };
+  if (next === currentHotkey) return { ok: true, accelerator: currentHotkey };
+
+  const previous = currentHotkey;
+  if (!applyHotkey(next)) {
+    applyHotkey(previous); // restore whatever was working before the attempt
+    return { ok: false, error: `"${next}" is already in use by another app, or can't be used as a global shortcut. Try a different key or combination.` };
+  }
+  saveHotkey(next);
+  return { ok: true, accelerator: next };
 });

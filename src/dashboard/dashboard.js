@@ -283,6 +283,34 @@ function confirmDialog({ title, message, ok = 'Confirm', danger = false }) {
   });
 }
 
+function promptDialog({ title, message, placeholder = '', value = '', ok = 'Save' }) {
+  return new Promise((resolve) => {
+    const input = $('confirmInput');
+    $('confirmTitle').textContent = title;
+    $('confirmMsg').textContent = message || '';
+    $('confirmOk').textContent = ok;
+    $('confirmOk').classList.remove('danger');
+    input.hidden = false;
+    input.placeholder = placeholder;
+    input.value = value;
+    confirmModal.hidden = false;
+    input.focus();
+    input.select();
+    const done = (v) => {
+      confirmModal.hidden = true;
+      input.hidden = true;
+      input.onkeydown = null;
+      confirmModal._cancel = null;
+      resolve(v);
+    };
+    $('confirmOk').onclick = () => done(input.value.trim() || null);
+    $('confirmCancel').onclick = () => done(null);
+    confirmModal.onclick = (e) => { if (e.target === confirmModal) done(null); };
+    confirmModal._cancel = () => done(null);
+    input.onkeydown = (e) => { if (e.key === 'Enter') done(input.value.trim() || null); };
+  });
+}
+
 function beep() {
   try {
     const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -693,6 +721,94 @@ $('settingsClose').addEventListener('click', () => { settingsModal.hidden = true
 settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.hidden = true; });
 $('setNav').addEventListener('click', (e) => { const b = e.target.closest('.set-nav-item'); if (b) openSettings(b.dataset.pane); });
 
+// ---------- global shortcut recorder ----------
+const shortcutDisplay = $('shortcutDisplay');
+const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta']);
+const KEY_LABELS = { ' ': 'Space', Escape: 'Esc', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' };
+
+function acceleratorToLabel(accel) {
+  return String(accel || '').split('+').map((p) => (p === 'CommandOrControl' ? 'Ctrl' : p === 'Super' ? 'Win' : p)).join(' + ');
+}
+function keyEventToAccelerator(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Control');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push('Super');
+  if (!MODIFIER_KEYS.has(e.key)) {
+    let k = KEY_LABELS[e.key] || (e.key.length === 1 ? e.key.toUpperCase() : e.key);
+    parts.push(k);
+  }
+  return parts.join('+');
+}
+
+async function loadShortcutDisplay() {
+  if (!window.clipdows.getGlobalShortcut) return;
+  try {
+    const { accelerator } = await window.clipdows.getGlobalShortcut();
+    shortcutDisplay.textContent = acceleratorToLabel(accelerator);
+  } catch { /* ignore */ }
+}
+loadShortcutDisplay();
+
+async function applyNewShortcut(accelerator) {
+  shortcutDisplay.classList.remove('recording');
+  if (!accelerator) { loadShortcutDisplay(); return; }
+  const prevLabel = shortcutDisplay.textContent;
+  shortcutDisplay.textContent = acceleratorToLabel(accelerator);
+  try {
+    const result = await window.clipdows.setGlobalShortcut(accelerator);
+    if (result.ok) {
+      showToast('Shortcut updated', `Press ${acceleratorToLabel(result.accelerator)} to show or hide ClipDows`);
+    } else {
+      shortcutDisplay.textContent = prevLabel;
+      showToast('Could not set shortcut', result.error || 'Try a different key or combination.');
+    }
+  } catch (err) {
+    shortcutDisplay.textContent = prevLabel;
+    showToast('Could not set shortcut', 'Something went wrong. Please try again.');
+  }
+}
+
+$('shortcutChangeBtn').addEventListener('click', () => {
+  if (shortcutDisplay.classList.contains('recording')) return;
+  shortcutDisplay.classList.add('recording');
+  shortcutDisplay.textContent = 'Press a key…';
+
+  const onKeydown = (e) => {
+    e.preventDefault();
+    // A lone modifier (e.g. just Alt) finalizes on its own keyup below;
+    // any other key finalizes immediately on keydown.
+    if (!MODIFIER_KEYS.has(e.key)) {
+      cleanup();
+      applyNewShortcut(keyEventToAccelerator(e));
+    } else {
+      shortcutDisplay.textContent = acceleratorToLabel(keyEventToAccelerator(e)) + ' …';
+    }
+  };
+  const onKeyup = (e) => {
+    if (MODIFIER_KEYS.has(e.key) && shortcutDisplay.classList.contains('recording')) {
+      cleanup();
+      applyNewShortcut(e.key === 'Control' ? 'Control' : e.key === 'Alt' ? 'Alt' : e.key === 'Shift' ? 'Shift' : 'Super');
+    }
+  };
+  const onBlur = () => { cleanup(); applyNewShortcut(null); };
+  function cleanup() {
+    window.removeEventListener('keydown', onKeydown, true);
+    window.removeEventListener('keyup', onKeyup, true);
+    window.removeEventListener('blur', onBlur);
+  }
+  window.addEventListener('keydown', onKeydown, true);
+  window.addEventListener('keyup', onKeyup, true);
+  window.addEventListener('blur', onBlur);
+});
+
+$('shortcutResetBtn').addEventListener('click', async () => {
+  if (!window.clipdows.getGlobalShortcut) return;
+  const { default: def } = await window.clipdows.getGlobalShortcut();
+  applyNewShortcut(def || 'Alt');
+});
+
 document.querySelector('.settings-content').addEventListener('change', (e) => {
   const t = e.target;
   if (t.name === 'theme') settings.theme = t.value;
@@ -777,6 +893,30 @@ devicesBody.addEventListener('click', async (e) => {
   }
 });
 
+// ---------- rename this computer (local display name only) ----------
+const THIS_DEVICE_KEY = 'clipdows:thisDeviceName';
+function loadThisDeviceName() {
+  try {
+    const saved = localStorage.getItem(THIS_DEVICE_KEY);
+    if (saved) $('thisDeviceLabel').firstChild.textContent = saved + ' ';
+  } catch { /* ignore */ }
+}
+$('renameThisDeviceBtn').addEventListener('click', async () => {
+  const current = $('thisDeviceLabel').firstChild.textContent.trim();
+  const name = await promptDialog({
+    title: 'Rename this computer',
+    message: 'Choose whatever name helps you tell your devices apart.',
+    placeholder: 'This computer',
+    value: current,
+    ok: 'Save name',
+  });
+  if (!name) return;
+  $('thisDeviceLabel').firstChild.textContent = name + ' ';
+  try { localStorage.setItem(THIS_DEVICE_KEY, name); } catch { /* ignore */ }
+  showToast('Renamed', `Now shown as "${name}"`);
+});
+loadThisDeviceName();
+
 $('pairCancelBtn').addEventListener('click', () => { window.clipSync.cancelPairing(); showPairView(false); });
 $('addDeviceBtn').addEventListener('click', async () => {
   if (!window.clipSync) { showToast('Still connecting…', 'Try again in a second.'); return; }
@@ -784,10 +924,24 @@ $('addDeviceBtn').addEventListener('click', async () => {
   $('pairStatus').textContent = 'Generating your pairing code…';
   $('pairQrImg').removeAttribute('src');
   try {
-    const { qrDataUrl } = await window.clipSync.beginPairing((device) => {
+    const { qrDataUrl } = await window.clipSync.beginPairing(async (device) => {
       addDeviceRow(device.uid, device.name, Date.now());
       showToast('Device connected', `${device.name} is now synced`);
       showPairView(false);
+      const customName = await promptDialog({
+        title: 'Name this device',
+        message: 'Give it a name so you can recognize it later.',
+        placeholder: device.name,
+        value: device.name,
+        ok: 'Save name',
+      });
+      if (customName && customName !== device.name && window.clipSync.renameDevice) {
+        try {
+          await window.clipSync.renameDevice(device.uid, customName);
+          const row = devicesBody.querySelector(`.device-row[data-device="${CSS.escape(device.uid)}"] .device-info b`);
+          if (row) row.textContent = customName;
+        } catch (err) { console.error('[devices] could not rename device:', err); }
+      }
     });
     $('pairQrImg').src = qrDataUrl;
     $('pairStatus').textContent = 'Waiting for scan…';
