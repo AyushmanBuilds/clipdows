@@ -169,6 +169,7 @@ async function applyUser(user) {
     $('userAvatar').textContent = $('sUserAvatar').textContent = initials;
     // Point the local database at THIS account's private file before anything is shown.
     await window.clipdows.setSession(user.uid);
+    await loadPlan();
     resetViewState();
     onboarding.hidden = true;
     appRoot.hidden = false;
@@ -198,7 +199,7 @@ function resetViewState() {
   chipsEl.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c.dataset.type === 'all'));
   document.querySelectorAll('[id^="count-"]').forEach((el) => { el.textContent = '0'; });
   devicesBody.querySelectorAll('.device-row:not([data-device="this"])').forEach((r) => r.remove());
-  [settingsModal, devicesModal, snippetModal, confirmModal].forEach((m) => { m.hidden = true; });
+  [settingsModal, devicesModal, snippetModal, confirmModal, $('vaultModal'), $('timeModal')].forEach((m) => { m.hidden = true; });
   $('toast').hidden = true;
 }
 window.addEventListener('clipauth:state', (e) => applyUser(e.detail));
@@ -324,6 +325,64 @@ function beep() {
   } catch (e) { /* ignore */ }
 }
 
+// ---------- plans ----------
+let planInfo = null;
+let lockedCount = 0;
+const FEATURE_TIER = { appFilter: 'Pro', customExpiry: 'Pro', export: 'Pro', actions: 'Pro', variables: 'Max', triggers: 'Max', timeMachine: 'Max' };
+const UPGRADE_MSG = {
+  pinned: (m) => `The Free plan allows ${m} pinned items. Upgrade for unlimited pins.`,
+  snippets: (m) => `Your plan allows ${m} snippets. Upgrade for more.`,
+  phones: (m) => `Your plan allows ${m} linked phone${m === 1 ? '' : 's'}. Upgrade to link more.`,
+  appFilter: () => 'App filters and ignored apps are a Pro feature.',
+  customExpiry: () => 'Custom secret-expiry time is a Pro feature.',
+  export: () => 'Exporting your data is a Pro feature.',
+  actions: () => 'This instant action is a Pro feature.',
+  variables: () => 'Snippet variables are a Max feature.',
+  triggers: () => 'Snippet triggers are a Max feature.',
+  timeMachine: () => 'Time machine is a Max feature.',
+};
+function upgradeToast(feature, max) {
+  const f = UPGRADE_MSG[feature];
+  showToast('Upgrade to unlock', f ? f(max) : 'This feature needs a higher plan.');
+}
+async function loadPlan() {
+  try { planInfo = await window.clipdows.getPlan(); } catch (e) { planInfo = null; }
+  applyPlanUI();
+}
+function applyPlanUI() {
+  if (!planInfo) return;
+  const label = planInfo.tier === 'max' ? 'Max' : planInfo.tier === 'pro' ? (planInfo.trial ? 'Pro trial' : 'Pro') : 'Free';
+  const b = $('planBadge'); b.textContent = label; b.classList.toggle('ok', planInfo.tier !== 'free');
+  $('planSub').textContent = planInfo.trial ? `${plural(planInfo.trialDaysLeft, 'day')} left in your free Pro trial.` : planInfo.tier === 'free' ? 'Upgrade for more history, sync and power features.' : 'Thanks for supporting ClipDows.';
+  $('devPlanRow').hidden = !planInfo.dev; $('devPlanSel').value = planInfo.devTier || '';
+  document.querySelectorAll('[data-feature]').forEach((row) => {
+    const f = row.dataset.feature;
+    const locked = !planInfo.limits[f];
+    row.classList.toggle('plan-locked', locked);
+    const label = row.querySelector('b');
+    if (label && !label.querySelector('.tier-tag')) { const tg = document.createElement('em'); tg.className = 'tier-tag'; tg.textContent = FEATURE_TIER[f] || 'Pro'; label.appendChild(tg); }
+    const tagEl = label && label.querySelector('.tier-tag'); if (tagEl) tagEl.hidden = !locked;
+  });
+  const can = !!planInfo.limits.triggers;
+  $('snippetTrigger').disabled = !can;
+  $('snippetTrigger').placeholder = can ? 'Trigger, e.g. ;addr  (optional)' : 'Trigger & variables — Max plan';
+  $('snippetVarsHint').hidden = false;
+  $('timeMachineBtn').classList.toggle('plan-locked', !planInfo.limits.timeMachine);
+  applySettings(); // re-send plan-gated settings (ignored apps, secret expiry) to the main process
+  if (!appRoot.hidden) refresh();
+}
+window.clipdows.onPlanChanged((info) => { planInfo = info; applyPlanUI(); });
+$('devPlanSel').addEventListener('change', async (e) => { planInfo = await window.clipdows.setDevPlan(e.target.value); applyPlanUI(); });
+
+// ---------- source-app icons ----------
+const appIconCache = new Map();
+async function loadAppIcon(exePath, img) {
+  if (!img) return;
+  if (!appIconCache.has(exePath)) appIconCache.set(exePath, window.clipdows.getAppIcon(exePath).catch(() => null));
+  const url = await appIconCache.get(exePath);
+  if (url) { img.src = url; img.hidden = false; }
+}
+
 // ---------- cards ----------
 function renderCard(item, inTrash) {
   const t = TYPE_LABEL[item.type] ? item.type : 'text';
@@ -345,7 +404,8 @@ function renderCard(item, inTrash) {
       ${inTrash ? '' : `<button class="card-pin-btn ${item.pinned ? 'pinned-active' : ''}" title="${item.pinned ? 'Unpin' : 'Pin'}">${svg('pin')}</button>`}
     </div>
     ${body}${tags}
-    <div class="card-meta">${item.char_count ? plural(item.char_count, 'character') : ''}</div>`;
+    <div class="card-meta">${item.sensitive ? `<span class="badge-sens">${escapeHtml(item.sensitive_label || 'Sensitive')} &middot; auto-deletes</span>` : (item.char_count ? plural(item.char_count, 'character') : '')}${item.source_app ? `<span class="card-src"><img class="card-src-icon" alt="" hidden />${escapeHtml(item.source_app)}</span>` : ''}${item.type === 'image' && item.ocr_text ? '<span class="card-src">Text found</span>' : ''}</div>`;
+  if (item.source_app && item.source_path) loadAppIcon(item.source_path, el.querySelector('.card-src-icon'));
 
   el.addEventListener('click', (e) => {
     if (e.target.closest('.card-pin-btn')) return;
@@ -356,7 +416,8 @@ function renderCard(item, inTrash) {
   const pin = el.querySelector('.card-pin-btn');
   if (pin) pin.addEventListener('click', async (e) => {
     e.stopPropagation();
-    await window.clipdows.togglePin(item.id);
+    const pr = await window.clipdows.togglePin(item.id);
+    if (pr && pr.limit) upgradeToast('pinned', pr.max);
     refresh();
   });
   return el;
@@ -369,6 +430,7 @@ async function refresh() {
   allItems = res.items || [];
   pinnedAll = res.pinned || [];
   trashCount = res.trashCount || 0;
+  lockedCount = res.lockedCount || 0;
   trashItems = inTrash ? ((await window.clipdows.getItems({ trashed: true, limit: 500 })).items || []) : [];
   if (inTrash) trashCount = trashItems.length;
 
@@ -380,7 +442,15 @@ async function refresh() {
   Object.keys(counts).forEach((k) => { const el = $(`count-${k}`); if (el) el.textContent = counts[k]; });
 
   const q = currentSearch.toLowerCase();
-  const match = (i) => !q || ((i.type === 'image' ? '' : (i.content || '')) + ' ' + (i.preview || '') + ' ' + (i.tags || []).join(' ')).toLowerCase().includes(q);
+  // "app:code invoice" -> clips from an app matching "code" that contain "invoice"
+  const am = planInfo && planInfo.limits.appFilter ? q.match(/^app:(\S*)\s*(.*)$/) : null;
+  const appQ = am ? am[1] : '', textQ = am ? am[2] : q;
+  const match = (i) => {
+    if (appQ && !String(i.source_app || '').toLowerCase().includes(appQ)) return false;
+    if (!textQ) return true;
+    const body = i.type === 'image' ? (i.ocr_text || '') : i.sensitive ? '' : (i.content || ''); // images: OCR text; secrets: never searchable
+    return (body + ' ' + (i.preview || '') + ' ' + (i.tags || []).join(' ') + ' ' + (i.source_app || '')).toLowerCase().includes(textQ);
+  };
   const byDate = (a, b) => currentSort === 'oldest' ? a.created_at - b.created_at : b.created_at - a.created_at;
 
   let base = inTrash ? trashItems : currentType === 'pinned' ? pinnedAll : currentType === 'all' ? allItems : allItems.filter((i) => i.type === currentType);
@@ -395,7 +465,7 @@ async function refresh() {
   gridList.forEach((i) => itemsGrid.appendChild(renderCard(i, inTrash)));
 
   sectionTitle.textContent = TITLES[currentType] || 'Items';
-  sectionCount.textContent = gridList.length ? plural(gridList.length, 'item') : '';
+  sectionCount.textContent = (gridList.length ? plural(gridList.length, 'item') : '') + (lockedCount && !inTrash && currentType === 'all' && !q ? `${gridList.length ? ' · ' : ''}${plural(lockedCount, 'older clip')} locked (upgrade to see)` : '');
   emptyTrashBtn.hidden = !(inTrash && trashItems.length);
 
   const empty = pinnedList.length + gridList.length === 0;
@@ -479,7 +549,8 @@ selDelete.addEventListener('click', () => deleteIds([...selected]));
 selPin.addEventListener('click', async () => {
   const ids = [...selected];
   const allPinned = ids.every((id) => pinnedAll.some((p) => p.id === id));
-  await bulk(allPinned ? 'unpin' : 'pin', ids);
+  const br = await bulk(allPinned ? 'unpin' : 'pin', ids);
+  if (br && br.limited) { upgradeToast('pinned', br.max); refresh(); return; }
   showToast(allPinned ? `Unpinned ${plural(ids.length, 'item')}` : `Pinned ${plural(ids.length, 'item')}`);
   refresh();
 });
@@ -542,6 +613,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (!confirmModal.hidden) { confirmModal._cancel && confirmModal._cancel(); return; }
+    if (!$('timeModal').hidden) { $('timeModal').hidden = true; return; }
     if (!snippetModal.hidden) { snippetModal.hidden = true; return; }
     if (!settingsModal.hidden) { settingsModal.hidden = true; return; }
     if (!devicesModal.hidden) { closeDevices(); return; }
@@ -549,15 +621,19 @@ document.addEventListener('keydown', (e) => {
     if (!detailPanel.hidden) closeDetail();
   }
 });
-function anyModalOpen() { return !(confirmModal.hidden && snippetModal.hidden && settingsModal.hidden && devicesModal.hidden); }
+function anyModalOpen() { return !(confirmModal.hidden && snippetModal.hidden && settingsModal.hidden && devicesModal.hidden && $('vaultModal').hidden && $('timeModal').hidden); }
 
 // ---------- new snippet ----------
-function openSnippet() { $('snippetTitle').value = ''; $('snippetContent').value = ''; snippetModal.hidden = false; $('snippetTitle').focus(); }
+function openSnippet() { $('snippetTitle').value = ''; $('snippetContent').value = ''; $('snippetTrigger').value = ''; snippetModal.hidden = false; $('snippetTitle').focus(); }
 async function saveSnippet() {
   const title = $('snippetTitle').value.trim();
   const text = $('snippetContent').value;
   if (!title || !text.trim()) { showToast('Add a title and some text', 'Both are needed to save a snippet.'); return; }
-  await window.clipdows.createSnippet(title, text, 'General');
+  const res = await window.clipdows.createSnippet(title, text, 'General', $('snippetTrigger').value);
+  if (res && res.ok === false) {
+    if (res.limit) upgradeToast(res.limit, res.max); else showToast('Could not save snippet', res.error || 'Please try again.');
+    return;
+  }
   snippetModal.hidden = true;
   showToast('Snippet saved', title);
   refresh();
@@ -606,7 +682,73 @@ function openDetail(item) {
   paintDetailTools(item);
   renderTags(item);
   tagInput.hidden = true;
+  renderQuickActions(item);
 }
+
+// ---------- instant actions ----------
+function renderQuickActions(item) {
+  const box = $('detailQuick');
+  box.innerHTML = '';
+  const acts = (window.clipActions && item.type !== 'image' && !item.sensitive && currentType !== 'trash') ? window.clipActions.list(item.content) : [];
+  box.hidden = !acts.length;
+  const full = !!(planInfo && planInfo.limits.actions === 'full');
+  acts.forEach((a) => {
+    const btn = document.createElement('button');
+    const locked = a.full && !full;
+    btn.className = 'quick-chip' + (locked ? ' locked' : '');
+    if (a.swatch) { const sw = document.createElement('i'); sw.className = 'quick-swatch'; sw.style.background = a.swatch; btn.appendChild(sw); }
+    btn.appendChild(document.createTextNode(a.label + (locked ? ' · Pro' : '')));
+    btn.addEventListener('click', async () => {
+      if (locked) { upgradeToast('actions'); return; }
+      try { await navigator.clipboard.writeText(a.run(item.content || '')); showToast('Copied', a.label); }
+      catch (e) { showToast('Could not apply', 'This content cannot be converted.'); }
+    });
+    box.appendChild(btn);
+  });
+}
+
+// ---------- time machine ----------
+let tmItems = [], tmMin = 0, tmMax = 0;
+const pad2 = (n) => String(n).padStart(2, '0');
+const toLocalInput = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+async function openTimeMachine() {
+  if (!planInfo || !planInfo.limits.timeMachine) { upgradeToast('timeMachine'); return; }
+  const res = await window.clipdows.getItems({ limit: 100000 });
+  tmItems = (res.items || []).filter((i) => i.type !== 'snippet');
+  tmMax = Date.now();
+  tmMin = tmItems.length ? Math.min(...tmItems.map((i) => i.created_at)) : tmMax - 86400000;
+  $('tmSlider').value = 1000;
+  $('tmWhen').value = toLocalInput(tmMax);
+  $('timeModal').hidden = false;
+  renderTimeMachine();
+}
+function tmSelected() { const v = new Date($('tmWhen').value).getTime(); return Number.isFinite(v) ? v : tmMax; }
+function renderTimeMachine() {
+  const at = tmSelected(), win = +$('tmWindow').value;
+  const hits = tmItems.filter((i) => Math.abs(i.created_at - at) <= win).sort((a, b) => a.created_at - b.created_at).slice(0, 150);
+  const list = $('tmList'); list.innerHTML = '';
+  $('tmSub').textContent = tmItems.length ? `${plural(hits.length, 'clip')} around ${new Date(at).toLocaleString()}` : 'Nothing copied yet.';
+  hits.forEach((i) => {
+    const row = document.createElement('div'); row.className = 'tm-item';
+    const time = document.createElement('span'); time.className = 'tm-time'; time.textContent = new Date(i.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const body = document.createElement('span'); body.className = 'tm-body';
+    body.textContent = (i.type === 'image' ? 'Image' : (i.preview || '')) + (i.source_app ? `  ·  ${i.source_app}` : '');
+    const cp = document.createElement('button'); cp.className = 'ghost-btn sm'; cp.textContent = 'Copy';
+    cp.addEventListener('click', async () => { await window.clipdows.copyOnly(i.id); showToast('Copied', 'Back on your clipboard'); });
+    row.append(time, body, cp); list.appendChild(row);
+  });
+  if (tmItems.length && !hits.length) { const e = document.createElement('div'); e.className = 'tm-empty'; e.textContent = 'Nothing copied in this window — widen it or move the slider.'; list.appendChild(e); }
+}
+$('timeMachineBtn').addEventListener('click', openTimeMachine);
+$('tmClose').addEventListener('click', () => { $('timeModal').hidden = true; });
+$('timeModal').addEventListener('click', (e) => { if (e.target === $('timeModal')) $('timeModal').hidden = true; });
+$('tmSlider').addEventListener('input', (e) => { $('tmWhen').value = toLocalInput(tmMin + (tmMax - tmMin) * (+e.target.value / 1000)); renderTimeMachine(); });
+$('tmWhen').addEventListener('change', () => {
+  const span = tmMax - tmMin || 1;
+  $('tmSlider').value = Math.round(Math.min(1, Math.max(0, (tmSelected() - tmMin) / span)) * 1000);
+  renderTimeMachine();
+});
+$('tmWindow').addEventListener('change', renderTimeMachine);
 function closeDetail() { detailPanel.hidden = true; selectedItem = null; }
 $('detailBack').addEventListener('click', closeDetail);
 $('detailClose').addEventListener('click', closeDetail);
@@ -631,7 +773,8 @@ detailPin.addEventListener('click', async () => {
     refresh();
     return;
   }
-  await window.clipdows.togglePin(selectedItem.id);
+  const pr = await window.clipdows.togglePin(selectedItem.id);
+  if (pr && pr.limit) { upgradeToast('pinned', pr.max); return; }
   selectedItem.pinned = selectedItem.pinned ? 0 : 1;
   paintDetailTools(selectedItem);
   refresh();
@@ -678,7 +821,7 @@ tagInput.addEventListener('keydown', async (e) => {
 
 // ---------- settings (auto-saved) ----------
 const SETTINGS_KEY = 'clipdows:settings:v2';
-const DEFAULTS = { theme: 'system', a1: '#4F8DF7', a2: '#3B6CF0', tray: true, startup: true, sound: false, compact: false, view: 'grid' };
+const DEFAULTS = { theme: 'system', a1: '#4F8DF7', a2: '#3B6CF0', tray: true, startup: true, sound: false, compact: false, view: 'grid', guard: true, sourceApp: true, ocr: true, ignoredApps: '', secretTtl: '0' };
 const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
 
 function readSaved() {
@@ -696,7 +839,7 @@ function applySettings() {
   root.style.setProperty('--accent-2', settings.a2);
   content.classList.toggle('compact', !!settings.compact);
   document.body.classList.toggle('compact', !!settings.compact);
-  if (window.clipdows.applySettings) window.clipdows.applySettings({ tray: settings.tray, startup: settings.startup, dark });
+  if (window.clipdows.applySettings) window.clipdows.applySettings({ tray: settings.tray, startup: settings.startup, dark, guard: settings.guard, sourceApp: settings.sourceApp, ocr: settings.ocr, ignoredApps: settings.ignoredApps, secretTtl: settings.secretTtl });
 }
 function syncControls() {
   document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === settings.theme; });
@@ -811,6 +954,8 @@ $('shortcutResetBtn').addEventListener('click', async () => {
 
 document.querySelector('.settings-content').addEventListener('change', (e) => {
   const t = e.target;
+  const lock = t.closest && t.closest('.plan-locked');
+  if (lock) { upgradeToast(lock.dataset.feature); syncControls(); return; }
   if (t.name === 'theme') settings.theme = t.value;
   else if (t.dataset.setting) settings[t.dataset.setting] = t.type === 'checkbox' ? t.checked : t.value;
   else return;
@@ -834,6 +979,7 @@ $('clearHistoryBtn').addEventListener('click', async () => {
 });
 $('emptyTrashSettingsBtn').addEventListener('click', emptyTrash);
 $('exportBtn').addEventListener('click', async () => {
+  if (!planInfo || !planInfo.limits.export) { upgradeToast('export'); return; }
   const { items } = await window.clipdows.getItems({ limit: 100000 });
   const out = items.map(({ id, type, content, tags, pinned, created_at }) => ({ id, type, content, tags, pinned, created_at }));
   const a = document.createElement('a');
@@ -920,6 +1066,12 @@ loadThisDeviceName();
 $('pairCancelBtn').addEventListener('click', () => { window.clipSync.cancelPairing(); showPairView(false); });
 $('addDeviceBtn').addEventListener('click', async () => {
   if (!window.clipSync) { showToast('Still connecting…', 'Try again in a second.'); return; }
+  const maxPhones = planInfo ? planInfo.limits.phones : 1;
+  if (maxPhones >= 0) {
+    let have = 0;
+    try { have = (await window.clipSync.listDevices()).length; } catch (e) { /* ignore */ }
+    if (have >= maxPhones) { upgradeToast('phones', maxPhones); return; }
+  }
   showPairView(true);
   $('pairStatus').textContent = 'Generating your pairing code…';
   $('pairQrImg').removeAttribute('src');
@@ -957,3 +1109,44 @@ syncControls();
 setViewMode(settings.view, false);
 window.clipdows.onItemsUpdated(() => refresh());
 refresh();
+// ---------- end-to-end encryption UI ----------
+window.clipVaultPrompt = (mode, err) => new Promise((resolve) => {
+  const m = $('vaultModal'), p1 = $('vaultPass'), p2 = $('vaultPass2'), errEl = $('vaultErr');
+  const create = mode === 'create';
+  $('vaultTitle').textContent = create ? 'Create your sync passphrase' : 'Unlock encrypted sync';
+  $('vaultSub').textContent = create
+    ? "Your clipboard is encrypted on this PC before it is uploaded. Only this passphrase can unlock it \u2014 we can't recover it for you."
+    : 'Enter the passphrase you chose for this account to resume syncing.';
+  p2.hidden = !create; $('vaultForgot').hidden = create;
+  errEl.textContent = err || ''; p1.value = ''; p2.value = '';
+  m.hidden = false; p1.focus();
+  const done = (v) => { m.hidden = true; $('vaultOk').onclick = $('vaultSkip').onclick = $('vaultForgot').onclick = null; p1.onkeydown = p2.onkeydown = null; resolve(v); };
+  $('vaultOk').onclick = () => {
+    const pass = p1.value;
+    if (create) {
+      if (pass.length < 8) { errEl.textContent = 'Use at least 8 characters.'; return; }
+      if (pass !== p2.value) { errEl.textContent = "The two passphrases don't match."; return; }
+    } else if (!pass) return;
+    done({ pass });
+  };
+  $('vaultSkip').onclick = () => done(null);
+  $('vaultForgot').onclick = async () => {
+    const ok = await confirmDialog({ title: 'Reset encryption?', message: 'Your synced clips can\u2019t be recovered without the passphrase. Resetting deletes them from the cloud so you can start fresh. Phones must be re-linked.', ok: 'Reset', danger: true });
+    if (ok) done({ reset: true });
+  };
+  p1.onkeydown = p2.onkeydown = (e) => { if (e.key === 'Enter') $('vaultOk').click(); };
+});
+
+window.addEventListener('clipsync:crypto', (e) => {
+  const on = !!(e.detail && e.detail.on);
+  const b = $('e2eBadge'); b.textContent = on ? 'On' : 'Locked'; b.classList.toggle('ok', on);
+  $('e2eBtn').hidden = on;
+});
+$('e2eBtn').addEventListener('click', () => { settingsModal.hidden = true; if (window.clipSync) window.clipSync.resumeClipSync(); });
+$('purgePlainBtn').addEventListener('click', async () => {
+  if (!window.clipSync) return;
+  const ok = await confirmDialog({ title: 'Delete old unencrypted items?', message: 'Removes clips uploaded before encryption was on. Your local history is not touched.', ok: 'Delete', danger: true });
+  if (!ok) return;
+  try { const n = await window.clipSync.purgePlaintext(); showToast('Done', n ? plural(n, 'old item') + ' deleted from the cloud.' : 'Nothing to delete.'); }
+  catch (err) { showToast('Could not delete', 'Check your connection and try again.'); }
+});

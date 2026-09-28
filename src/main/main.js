@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage, Notification, safeStorage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -7,6 +7,13 @@ const db = require('./db');
 const watcher = require('./clipboardWatcher');
 const autoPaste = require('./autoPaste');
 const googleAuth = require('./googleAuth');
+const prefs = require('./prefs');
+const sensitive = require('./sensitive');
+const sourceApp = require('./sourceApp');
+const ocr = require('./ocr');
+const plan = require('./plan');
+const snippets = require('./snippets');
+const triggers = require('./triggers');
 
 let popupWindow = null;
 let dashboardWindow = null;
@@ -127,6 +134,7 @@ function createTray() {
   const menu = Menu.buildFromTemplate([
     { label: 'Show Clipboard  (Caps Lock)', click: togglePopup },
     { label: 'Open Dashboard', click: createDashboardWindow },
+    { label: `Paste Stack: start / stop  (${STACK_TOGGLE_KEY})`, click: toggleStack },
     { type: 'separator' },
     { label: 'Settings', click: createDashboardWindow },
     { label: 'Check for Updates', click: () => {} },
@@ -165,8 +173,9 @@ function saveHotkey(accelerator) {
 }
 
 /** (Re)registers `accelerator` as the global show/hide hotkey. Returns true/false. */
+let registeredHotkey = null; // only OUR show/hide hotkey is unregistered here, so the paste-stack keys survive
 function applyHotkey(accelerator) {
-  globalShortcut.unregisterAll();
+  if (registeredHotkey) { try { globalShortcut.unregister(registeredHotkey); } catch { /* ignore */ } registeredHotkey = null; }
   let ok = false;
   try {
     ok = globalShortcut.register(accelerator, togglePopup);
@@ -175,6 +184,7 @@ function applyHotkey(accelerator) {
     ok = false;
   }
   if (ok) {
+    registeredHotkey = accelerator;
     currentHotkey = accelerator;
     console.log(`[main] Registered hotkey: ${accelerator}`);
   }
@@ -194,16 +204,27 @@ function registerShortcuts() {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('com.ayushmanbuilds.clipdows'); // needed for Windows notifications
   if (app.isPackaged) Menu.setApplicationMenu(null);
   createTray();
   registerShortcuts();
+  registerStackShortcuts();
+  triggers.init({ watcher, autoPaste });
   watcher.start((newItem) => {
     if (dashboardWindow) dashboardWindow.webContents.send('items:updated', newItem);
     // Push every freshly-captured item up to Firestore too, so it's on the
     // phone in real time. The renderer owns the Firebase session (it's
     // already signed in there), so main.js just hands the item off.
-    if (dashboardWindow) dashboardWindow.webContents.send('cloud:push', newItem);
+    // Secrets caught by the sensitive-data guard are NEVER uploaded.
+    const L = plan.limits();
+    if (dashboardWindow && !newItem.sensitive && (newItem.type !== 'image' || L.syncImages)) {
+      dashboardWindow.webContents.send('cloud:push', { ...newItem, syncCap: L.syncItems });
+    }
+    if (L.history > 0) db.enforceRetention(L.history * 3); // keep storage bounded; older clips beyond the plan window are locked, not deleted right away
+    pushToStack(newItem);
+    if (newItem.type === 'image' && prefs.ocr) ocr.enqueue(newItem, () => notifyItemsChanged(null));
   });
+  setInterval(purgeSensitive, 5000); // auto-expire secrets
 }).catch((err) => {
   console.error('[main] Failed to start ClipDows:', err);
 });
@@ -213,14 +234,84 @@ app.on('window-all-closed', (e) => {
 });
 
 app.on('will-quit', () => {
+  triggers.stop();
   globalShortcut.unregisterAll();
   watcher.stop();
 });
 
 // ---------- helpers ----------
 function notifyItemsChanged(payload = null) {
+  triggers.refresh();
   if (dashboardWindow) dashboardWindow.webContents.send('items:updated', payload);
   if (popupWindow) popupWindow.webContents.send('items:updated', payload);
+}
+
+// ---------- sensitive items: auto-expiry ----------
+function purgeSensitive() {
+  const gone = db.purgeExpired();
+  if (!gone.length) return;
+  gone.forEach((it) => { if (it.type !== 'image') watcher.clearIfMatches(it.content); });
+  notifyItemsChanged(null);
+}
+
+// ---------- paste stack ----------
+// Ctrl+Alt+C  -> start / stop collecting. While ON, everything you copy is queued.
+// Ctrl+Alt+V  -> paste the next queued item (first copied = first pasted).
+const STACK_TOGGLE_KEY = 'Ctrl+Alt+C';
+const STACK_PASTE_KEY = 'Ctrl+Alt+V';
+let stackActive = false;
+let stack = [];
+let stackFullNotified = false;
+
+function stackNotify(title, body) {
+  try { if (Notification.isSupported()) new Notification({ title, body, silent: true, icon: loadAppIcon() }).show(); }
+  catch { /* ignore */ }
+}
+function refreshStackTip() {
+  if (tray) tray.setToolTip(stackActive ? `ClipDows — paste stack: ${stack.length} queued` : 'ClipDows');
+}
+function toggleStack() {
+  stackActive = !stackActive;
+  stack = []; stackFullNotified = false;
+  refreshStackTip();
+  stackNotify(stackActive ? 'Paste stack ON' : 'Paste stack OFF',
+    stackActive ? `Copy items in order, then press ${STACK_PASTE_KEY} to paste them one by one.` : 'Back to normal clipboard.');
+}
+function pushToStack(item) {
+  if (!stackActive || item.sensitive) return;
+  const max = plan.limits().stack;
+  if (max >= 0 && stack.length >= max) {
+    if (!stackFullNotified) { stackFullNotified = true; stackNotify('Paste stack is full', `The Free plan holds ${max} items. Upgrade for unlimited.`); }
+    return;
+  }
+  stack.push(item.id);
+  refreshStackTip();
+}
+async function pasteFromStack() {
+  if (!stackActive) return;
+  let row = null;
+  while (stack.length && !row) {
+    row = db.getItem(stack.shift());
+    if (row && row.trashed === 1) row = null;
+  }
+  if (!row) {
+    stackActive = false; refreshStackTip();
+    stackNotify('Paste stack empty', 'Nothing left to paste — stack turned off.');
+    return;
+  }
+  watcher.writeToClipboard(row);
+  await autoPaste.simulatePaste({ releaseModifiers: true });
+  if (!stack.length) {
+    stackActive = false;
+    stackNotify('Paste stack finished', 'Everything has been pasted.');
+  }
+  refreshStackTip();
+}
+function registerStackShortcuts() {
+  [[STACK_TOGGLE_KEY, toggleStack], [STACK_PASTE_KEY, pasteFromStack]].forEach(([key, fn]) => {
+    try { if (!globalShortcut.register(key, fn)) console.warn(`[main] Could not register paste-stack key ${key} (in use elsewhere).`); }
+    catch (err) { console.warn(`[main] Invalid paste-stack key ${key}:`, err.message); }
+  });
 }
 
 // ---------- IPC handlers ----------
@@ -228,31 +319,53 @@ function notifyItemsChanged(payload = null) {
 // Which account's private database is active (null = signed out).
 ipcMain.handle('session:set', (_evt, uid) => {
   db.setUser(uid || null);
+  plan.load(uid || null);
+  stack = []; stackActive = false; refreshStackTip();
+  purgeSensitive();                       // drop secrets that expired while the app was closed
+  if (uid && prefs.ocr) ocr.backfill(() => notifyItemsChanged(null));
   notifyItemsChanged(null);
   return { ok: true };
 });
 
 ipcMain.handle('items:get', (_evt, opts) => {
-  return { items: db.getItems(opts || {}), pinned: db.getPinned(), trashCount: db.getTrashCount() };
+  const cap = plan.limits().history;
+  const o = { ...(opts || {}) };
+  if (cap > 0 && !o.trashed) o.historyCap = cap;
+  const lockedCount = cap > 0 ? Math.max(0, db.countUnpinned() - cap) : 0;
+  return { items: db.getItems(o), pinned: db.getPinned(), trashCount: db.getTrashCount(), lockedCount };
 });
+
+// Snippets can use variables ({date}, {clipboard}, {cursor}...) on the Max plan.
+function resolveForPaste(row) {
+  if (row.type === 'snippet' && plan.limits().variables) {
+    const ex = snippets.expand(row.content, clipboard.readText());
+    return { row: { ...row, content: ex.text }, cursorBack: ex.cursorBack };
+  }
+  return { row, cursorBack: 0 };
+}
 
 ipcMain.handle('items:paste', async (_evt, id) => {
   const row = db.getItem(id);
   if (!row) return { ok: false };
-  watcher.writeToClipboard(row);
+  const ex = resolveForPaste(row);
+  watcher.writeToClipboard(ex.row);
   if (dashboardWindow) dashboardWindow.hide();
   await autoPaste.simulatePaste();
+  if (ex.cursorBack) await autoPaste.moveLeft(ex.cursorBack);
   return { ok: true };
 });
 
 ipcMain.handle('items:copyOnly', (_evt, id) => {
   const row = db.getItem(id);
   if (!row) return { ok: false };
-  watcher.writeToClipboard(row);
+  watcher.writeToClipboard(resolveForPaste(row).row);
   return { ok: true };
 });
 
 ipcMain.handle('items:togglePin', (_evt, id) => {
+  const cur = db.getItem(id);
+  const maxPins = plan.limits().pinned;
+  if (cur && cur.pinned !== 1 && maxPins >= 0 && db.getPinned().length >= maxPins) return { ok: false, limit: 'pinned', max: maxPins };
   db.togglePin(id);
   const updated = db.getItem(id);
   if (dashboardWindow) dashboardWindow.webContents.send('items:updated', updated);
@@ -262,14 +375,23 @@ ipcMain.handle('items:togglePin', (_evt, id) => {
 
 ipcMain.handle('items:trash', (_evt, id) => {
   db.trashItem(id);
+  triggers.refresh();
   return { ok: true };
 });
 
 // Multi-select actions: trash | restore | delete | pin | unpin | emptyTrash | clearUnpinned
 ipcMain.handle('items:bulk', (_evt, { action, ids }) => {
-  const count = db.bulk(action, Array.isArray(ids) ? ids : []);
+  let list = Array.isArray(ids) ? ids : [];
+  let limited = false;
+  const maxPins = plan.limits().pinned;
+  if (action === 'pin' && maxPins >= 0) {
+    const room = Math.max(0, maxPins - db.getPinned().length);
+    const fresh = list.filter((i) => { const it = db.getItem(i); return it && it.pinned !== 1; });
+    if (fresh.length > room) { list = fresh.slice(0, room); limited = true; }
+  }
+  const count = db.bulk(action, list);
   notifyItemsChanged(null);
-  return { ok: true, count };
+  return { ok: true, count, limited, limit: limited ? 'pinned' : undefined, max: maxPins };
 });
 
 ipcMain.handle('items:updateTags', (_evt, { id, tags }) => {
@@ -285,9 +407,19 @@ ipcMain.handle('items:updateContent', (_evt, { id, content }) => {
   return { ok: !!updated, item: updated };
 });
 
-ipcMain.handle('snippets:create', (_evt, { title, content, folder }) => {
+ipcMain.handle('snippets:create', (_evt, { title, content, folder, trigger }) => {
   if (!db.hasSession()) return { ok: false };
-  const snippet = db.insertSnippet({ id: crypto.randomUUID(), title, content, folder });
+  const L = plan.limits();
+  const have = db.getItems({ type: 'snippet', limit: 100000 }).length;
+  if (L.snippets >= 0 && have >= L.snippets) return { ok: false, limit: 'snippets', max: L.snippets };
+  let trig = String(trigger || '').trim().toLowerCase();
+  if (trig) {
+    if (!L.triggers) return { ok: false, limit: 'triggers' };
+    if (!/^[;/]?[a-z0-9-]{2,20}$/.test(trig)) return { ok: false, error: 'Trigger: 2-20 letters, numbers or dashes, e.g. ;addr' };
+    if (!/^[;/]/.test(trig)) trig = ';' + trig;
+    if (triggers.conflicts(trig)) return { ok: false, error: 'That trigger clashes with another snippet trigger.' };
+  }
+  const snippet = db.insertSnippet({ id: crypto.randomUUID(), title, content, folder, trigger: trig });
   // Snippets also show up in the clipboard list as a 'snippet' type item so they appear
   // alongside everything else in "All Items" / the Snippets tab.
   const item = db.insertItem({
@@ -296,7 +428,9 @@ ipcMain.handle('snippets:create', (_evt, { title, content, folder }) => {
     content: content,
     preview: title,
     char_count: String(content || '').length,
+    trigger: trig,
   });
+  triggers.refresh();
   if (dashboardWindow) dashboardWindow.webContents.send('items:updated', item);
   if (popupWindow) popupWindow.webContents.send('items:updated', item);
   return { ok: true, snippet, item };
@@ -304,6 +438,8 @@ ipcMain.handle('snippets:create', (_evt, { title, content, folder }) => {
 
 // Settings that need the main process: tray, launch at login, title-bar colours.
 ipcMain.on('settings:apply', (_evt, s) => {
+  const L = plan.limits();
+  prefs.set({ ...s, ignoredApps: L.appFilter ? s.ignoredApps : '', secretTtl: L.customExpiry ? s.secretTtl : 0 }); // Pro features
   try {
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!s.startup });
     if (s.tray === false && tray) { tray.destroy(); tray = null; }
@@ -348,16 +484,19 @@ ipcMain.handle('cloud:itemReceived', (_evt, item) => {
   if (!db.hasSession()) return { ok: false };
   // Avoid double-inserting something the desktop itself just pushed up.
   if (db.isDuplicateOfLatest(item.content, item.type)) return { ok: true, skipped: true };
-  const saved = db.insertItem({
+  const incoming = {
     id: item.id || crypto.randomUUID(),
     type: item.type,
     content: item.content,
     preview: item.preview,
     char_count: item.char_count,
     created_at: item.created_at,
-  });
+  };
+  if (prefs.guard) sensitive.mark(incoming); // e.g. an OTP sent from the phone
+  const saved = db.insertItem(incoming);
   if (!saved) return { ok: false };
   watcher.writeToClipboard(saved); // land it on the local OS clipboard too
+  if (saved.type === 'image' && prefs.ocr) ocr.enqueue(saved, () => notifyItemsChanged(null));
   if (dashboardWindow) dashboardWindow.webContents.send('items:updated', saved);
   return { ok: true, item: saved };
 });
@@ -366,6 +505,45 @@ ipcMain.handle('cloud:deviceLinked', (_evt, device) => {
   if (dashboardWindow) dashboardWindow.webContents.send('devices:updated', device);
   return { ok: true };
 });
+
+// ---------- Plans ----------
+function broadcastPlan() {
+  if (dashboardWindow) dashboardWindow.webContents.send('plan:changed', plan.info());
+  triggers.refresh();
+  notifyItemsChanged(null);
+}
+ipcMain.handle('plan:get', () => plan.info());
+ipcMain.handle('plan:setDev', (_evt, t) => { if (app.isPackaged) return plan.info(); plan.setDev(t); broadcastPlan(); return plan.info(); });
+ipcMain.handle('plan:setPaid', (_evt, p) => { plan.setPaid(p || {}); broadcastPlan(); return plan.info(); }); // payments step will call this
+
+// ---------- Encryption key vault ----------
+// The sync key is protected by Windows DPAPI (via Electron safeStorage): only this Windows
+// user on this PC can decrypt it, so the passphrase isn't asked on every launch.
+const VAULT_DIR = path.join(app.getPath('userData'), 'vault');
+const vaultFile = (uid) => path.join(VAULT_DIR, String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '') + '.key');
+
+ipcMain.handle('vault:load', (_evt, uid) => {
+  try {
+    if (!uid || !safeStorage.isEncryptionAvailable()) return null;
+    const f = vaultFile(uid);
+    return fs.existsSync(f) ? safeStorage.decryptString(fs.readFileSync(f)) : null;
+  } catch { return null; }
+});
+ipcMain.handle('vault:save', (_evt, uid, keyB64) => {
+  try {
+    if (!uid || !safeStorage.isEncryptionAvailable()) return { ok: false };
+    fs.mkdirSync(VAULT_DIR, { recursive: true });
+    fs.writeFileSync(vaultFile(uid), safeStorage.encryptString(String(keyB64)));
+    return { ok: true };
+  } catch { return { ok: false }; }
+});
+ipcMain.handle('vault:clear', (_evt, uid) => {
+  try { if (uid) fs.rmSync(vaultFile(uid), { force: true }); } catch { /* ignore */ }
+  return { ok: true };
+});
+
+// Icon of the app a clip was copied from (cached in sourceApp.js)
+ipcMain.handle('apps:icon', (_evt, exePath) => sourceApp.icon(exePath));
 
 // ---------- Global shortcut (user-configurable, default Alt) ----------
 ipcMain.handle('shortcut:get', () => ({ accelerator: currentHotkey, default: DEFAULT_HOTKEY }));

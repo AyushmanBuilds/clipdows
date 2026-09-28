@@ -81,6 +81,7 @@
           <kbd>Ctrl F</kbd>
         </label>
         <button class="icon-btn" id="selectModeBtn" title="Select multiple (Ctrl+A)"><i data-i="checksq"></i></button>
+        <button class="icon-btn" id="timeMachineBtn" title="Time machine (Max)"><i data-i="undo"></i></button>
         <button class="primary-btn" id="newSnippetBtn"><i data-i="plus"></i>New Snippet</button>
         <button class="icon-btn" id="openSettingsBtn" title="Settings"><i data-i="gear"></i></button>
       </header>
@@ -145,6 +146,7 @@
       </div>
       <div class="detail-body" id="detailBody" contenteditable="false"></div>
       <div class="detail-count" id="detailCount"></div>
+      <div class="quick-row" id="detailQuick" hidden></div>
 
       <div class="detail-tags">
         <span class="detail-label">Tags</span>
@@ -192,6 +194,8 @@
               <div class="profile-info"><b id="sUserName">Your account</b><span id="sUserEmail"></span></div>
               <button class="ghost-btn" id="signOutBtn"><i data-i="logout"></i>Sign out</button>
             </div>
+            <div class="set-row"><div><b>Your plan</b><span id="planSub"></span></div><span class="badge" id="planBadge">Free</span></div>
+            <div class="set-row" id="devPlanRow" hidden><div><b>Test plan (dev only)</b><span>Shown only when running from source. Not in the released app.</span></div><select class="select" id="devPlanSel"><option value="">Auto (trial / paid)</option><option value="free">Free</option><option value="pro">Pro</option><option value="max">Max</option></select></div>
             <div class="set-row"><div><b>Show app in system tray</b><span>Keep ClipDows one click away in the taskbar.</span></div><input class="switch" type="checkbox" data-setting="tray" /></div>
             <div class="set-row"><div><b>Start on Windows startup</b><span>Open ClipDows in the background when you sign in.</span></div><input class="switch" type="checkbox" data-setting="startup" /></div>
             <div class="set-row"><div><b>Play sound on new item</b><span>A soft tone whenever something is captured.</span></div><input class="switch" type="checkbox" data-setting="sound" /></div>
@@ -219,12 +223,20 @@
 
           <section class="set-pane" data-pane="sync" hidden>
             <div class="set-row"><div><b>Real-time sync</b><span>Everything you copy reaches your paired phones instantly.</span></div><span class="badge ok">On</span></div>
+            <div class="set-row"><div><b>End-to-end encryption</b><span id="e2eSub">Clips are encrypted before upload. Only your passphrase can read them.</span></div><span class="badge" id="e2eBadge">Locked</span><button class="ghost-btn" id="e2eBtn" hidden>Unlock</button></div>
+            <div class="set-row"><div><b>Old unencrypted items</b><span>Delete anything uploaded before encryption was turned on.</span></div><button class="ghost-btn danger" id="purgePlainBtn">Delete</button></div>
             <div class="set-row"><div><b>Connected devices</b><span id="syncPaneSub">1 device connected</span></div><button class="ghost-btn" id="manageDevicesBtn"><i data-i="monitor"></i>Manage devices</button></div>
           </section>
 
           <section class="set-pane" data-pane="privacy" hidden>
             <div class="set-row"><div><b>Clear history</b><span>Moves every unpinned item to Trash. You can still restore them.</span></div><button class="ghost-btn danger" id="clearHistoryBtn">Clear history</button></div>
             <div class="set-row"><div><b>Empty trash</b><span>Permanently deletes everything in Trash.</span></div><button class="ghost-btn danger" id="emptyTrashSettingsBtn">Empty trash</button></div>
+            <div class="set-row" data-feature="customExpiry"><div><b>Secret expiry time</b><span>How long masked secrets stay before they are deleted.</span></div><select class="select" data-setting="secretTtl"><option value="0">Default (1&ndash;2 min)</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option></select></div>
+            <div class="set-row"><div><b>Sensitive-data guard</b><span>Passwords, OTPs, cards and API keys are masked, deleted after 1&ndash;2 minutes and never synced.</span></div><input class="switch" type="checkbox" data-setting="guard" /></div>
+            <div class="set-row"><div><b>Remember source app</b><span>Show which app each clip came from. Tip: search <code>app:chrome</code> to filter.</span></div><input class="switch" type="checkbox" data-setting="sourceApp" /></div>
+            <div class="set-row" data-feature="appFilter"><div><b>Ignored apps</b><span>Never record copies from these apps (comma-separated).</span></div><input class="field" style="max-width:210px" type="text" data-setting="ignoredApps" placeholder="KeePass, 1Password" /></div>
+            <div class="set-row"><div><b>Search inside screenshots</b><span>Reads text in images on this PC (offline) so search can find it.</span></div><input class="switch" type="checkbox" data-setting="ocr" /></div>
+            <div class="set-row"><div><b>Paste stack</b><span>Press Ctrl+Alt+C, copy several things, then Ctrl+Alt+V pastes them one by one, in order.</span></div></div>
             <div class="set-row"><div><b>Local storage</b><span>Your clipboard history is stored on this computer and synced only to devices you paired.</span></div></div>
           </section>
 
@@ -250,7 +262,7 @@
           </section>
 
           <section class="set-pane" data-pane="advanced" hidden>
-            <div class="set-row"><div><b>Export your data</b><span>Save all active items as a JSON file.</span></div><button class="ghost-btn" id="exportBtn"><i data-i="download"></i>Export</button></div>
+            <div class="set-row" data-feature="export"><div><b>Export your data</b><span>Save all active items as a JSON file.</span></div><button class="ghost-btn" id="exportBtn"><i data-i="download"></i>Export</button></div>
             <div class="set-row"><div><b>About</b><span>ClipDows for Windows</span></div></div>
           </section>
 
@@ -297,9 +309,48 @@
       <div class="form-stack">
         <input class="field" id="snippetTitle" type="text" placeholder="Title, e.g. Email signature" />
         <textarea class="field" id="snippetContent" rows="7" placeholder="Snippet text"></textarea>
+        <input class="field" id="snippetTrigger" type="text" placeholder="Trigger, e.g. ;addr  (Max)" autocomplete="off" />
+        <p class="set-hint" id="snippetVarsHint">Max plan: use {date} {time} {clipboard} {cursor} in your text, and type the trigger anywhere to expand it.</p>
         <div class="modal-actions">
           <button class="ghost-btn" id="snippetCancel">Cancel</button>
           <button class="primary-btn" id="snippetSave">Save snippet</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Time machine ================= -->
+  <div class="modal-overlay" id="timeModal" hidden>
+    <div class="modal tm-modal">
+      <div class="modal-header"><h2>Time machine</h2><button class="icon-btn flat" id="tmClose"><i data-i="x"></i></button></div>
+      <div class="form-stack">
+        <p class="set-hint" id="tmSub">Drag the slider or pick a moment to see what you copied around then.</p>
+        <input type="range" id="tmSlider" min="0" max="1000" value="1000" />
+        <div class="tm-row">
+          <input class="field" id="tmWhen" type="datetime-local" />
+          <select class="select" id="tmWindow">
+            <option value="900000">&plusmn; 15 min</option><option value="1800000" selected>&plusmn; 30 min</option>
+            <option value="3600000">&plusmn; 1 hour</option><option value="10800000">&plusmn; 3 hours</option><option value="43200000">&plusmn; 12 hours</option>
+          </select>
+        </div>
+        <div class="tm-list" id="tmList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Encryption passphrase ================= -->
+  <div class="modal-overlay" id="vaultModal" hidden>
+    <div class="modal small-modal">
+      <div class="modal-header"><h2 id="vaultTitle">Create your sync passphrase</h2></div>
+      <div class="form-stack">
+        <p class="set-hint" id="vaultSub">Your clipboard is encrypted on this PC before it is uploaded. Only this passphrase can unlock it &mdash; we can't recover it for you.</p>
+        <input class="field" id="vaultPass" type="password" placeholder="Passphrase" autocomplete="off" />
+        <input class="field" id="vaultPass2" type="password" placeholder="Repeat passphrase" autocomplete="off" />
+        <p class="set-hint" id="vaultErr" style="color:var(--danger)"></p>
+        <div class="modal-actions">
+          <button class="ghost-btn danger" id="vaultForgot" hidden>Forgot it?</button>
+          <button class="ghost-btn" id="vaultSkip">Not now</button>
+          <button class="primary-btn" id="vaultOk">Continue</button>
         </div>
       </div>
     </div>
@@ -327,6 +378,7 @@
 
   <script type="module" src="firebase-auth.js"></script>
   <script type="module" src="firestoreSync.js"></script>
+  <script src="actions.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

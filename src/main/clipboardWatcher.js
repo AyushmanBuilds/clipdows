@@ -1,6 +1,9 @@
 const { clipboard, nativeImage } = require('electron');
 const crypto = require('crypto');
 const db = require('./db');
+const prefs = require('./prefs');
+const sensitive = require('./sensitive');
+const sourceApp = require('./sourceApp');
 
 const POLL_INTERVAL_MS = 600;
 const MAX_TEXT_PREVIEW = 140;
@@ -8,6 +11,7 @@ const MAX_TEXT_PREVIEW = 140;
 let lastSignature = null;
 let intervalHandle = null;
 let onNewItemCallback = null;
+let busy = false;
 
 function detectType(text) {
   if (!text) return 'text';
@@ -35,7 +39,23 @@ function hashContent(str) {
   return crypto.createHash('sha1').update(str).digest('hex');
 }
 
-function checkClipboard() {
+/** Foreground app at the moment of capture (also used for the per-app ignore list). */
+async function captureSource() {
+  if (!prefs.sourceApp && !prefs.ignoredApps.length) return null;
+  return sourceApp.current();
+}
+
+function attachSource(item, src) {
+  if (prefs.sourceApp && src && src.name) {
+    item.source_app = src.name;
+    item.source_path = src.path;
+  }
+}
+
+async function checkClipboard() {
+  // Password managers flag their copies as "do not record" — respect that.
+  if (prefs.guard && sensitive.excludedByApp(clipboard)) return;
+
   // Prefer image if present, else text
   const image = clipboard.readImage();
   if (!image.isEmpty()) {
@@ -47,6 +67,9 @@ function checkClipboard() {
     // a newly signed-in account from inheriting whatever was on the clipboard.
     if (!db.hasSession()) return;
 
+    const src = await captureSource();
+    if (sourceApp.isIgnored(src, prefs.ignoredApps)) return;
+
     const item = {
       id: crypto.randomUUID(),
       type: 'image',
@@ -56,6 +79,7 @@ function checkClipboard() {
       created_at: Date.now(),
       updated_at: Date.now(),
     };
+    attachSource(item, src);
     if (!db.insertItem(item)) return;
     if (onNewItemCallback) onNewItemCallback(item);
     return;
@@ -71,6 +95,9 @@ function checkClipboard() {
 
   if (db.isDuplicateOfLatest(text, detectType(text))) return;
 
+  const src = await captureSource();
+  if (sourceApp.isIgnored(src, prefs.ignoredApps)) return;
+
   const type = detectType(text);
   const item = {
     id: crypto.randomUUID(),
@@ -81,8 +108,18 @@ function checkClipboard() {
     created_at: Date.now(),
     updated_at: Date.now(),
   };
+  attachSource(item, src);
+  if (prefs.guard) sensitive.mark(item, prefs.secretTtl); // masks the preview + sets expires_at for secrets
   if (!db.insertItem(item)) return;
   if (onNewItemCallback) onNewItemCallback(item);
+}
+
+async function tick() {
+  if (busy) return;          // the source-app lookup is async; never overlap polls
+  busy = true;
+  try { await checkClipboard(); }
+  catch (err) { console.error('[watcher] poll failed:', err); }
+  finally { busy = false; }
 }
 
 function start(onNewItem) {
@@ -90,7 +127,7 @@ function start(onNewItem) {
   // seed signature so app launch doesn't re-capture whatever is already on the clipboard
   const existingText = clipboard.readText();
   if (existingText) lastSignature = 'text:' + hashContent(existingText);
-  intervalHandle = setInterval(checkClipboard, POLL_INTERVAL_MS);
+  intervalHandle = setInterval(tick, POLL_INTERVAL_MS);
 }
 
 function stop() {
@@ -109,4 +146,14 @@ function writeToClipboard(item) {
   );
 }
 
-module.exports = { start, stop, writeToClipboard, detectType };
+/** After a secret expires: wipe it from the real clipboard too, but only if it's still there. */
+function clearIfMatches(text) {
+  try {
+    if (clipboard.readText() === text) {
+      clipboard.clear();
+      lastSignature = null; // so copying the same secret again is captured normally
+    }
+  } catch { /* ignore */ }
+}
+
+module.exports = { start, stop, writeToClipboard, clearIfMatches, detectType };

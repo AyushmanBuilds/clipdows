@@ -60,6 +60,18 @@ function hasSession() {
   return !!currentUid;
 }
 
+const flatPreview = (text) => {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > 140 ? flat.slice(0, 140) + '…' : flat;
+};
+
+/** Pinning something means "keep it" — so it stops being masked / auto-expiring. */
+function unmask(item) {
+  if (!item.sensitive && !item.expires_at) return;
+  item.sensitive = null; item.sensitive_label = null; item.expires_at = null;
+  if (item.type !== 'image') item.preview = flatPreview(item.content);
+}
+
 function insertItem(item) {
   if (!dbPath) return null;
   const now = Date.now();
@@ -75,6 +87,10 @@ function insertItem(item) {
     created_at: item.created_at || now,
     updated_at: item.updated_at || now
   };
+  // optional metadata (sensitive-data guard, source app)
+  for (const k of ['sensitive', 'sensitive_label', 'expires_at', 'source_app', 'source_path', 'trigger']) {
+    if (item[k] != null) newItem[k] = item[k];
+  }
   data.items.push(newItem);
   saveData();
   return newItem;
@@ -87,18 +103,51 @@ function isDuplicateOfLatest(content, type) {
   return latest.content === content && latest.type === type;
 }
 
-function getItems({ type = 'all', search = '', limit = 200, trashed = false } = {}) {
+function getItems({ type = 'all', search = '', limit = 200, trashed = false, historyCap = 0 } = {}) {
   let items = data.items.filter(item => (trashed ? item.trashed === 1 : item.trashed === 0));
+  if (historyCap > 0 && !trashed) {
+    // plan limit: only the newest N unpinned clips are visible; older ones stay stored (locked) until you upgrade.
+    // Pinned items and snippets are never counted or hidden.
+    const allowed = new Set(items.filter(i => i.pinned !== 1 && i.type !== 'snippet')
+      .sort((a, b) => b.created_at - a.created_at).slice(0, historyCap).map(i => i.id));
+    items = items.filter(i => i.pinned === 1 || i.type === 'snippet' || allowed.has(i.id));
+  }
   if (type !== 'all') items = items.filter(item => item.type === type);
   if (search) {
-    const searchTerm = search.toLowerCase();
-    items = items.filter(item => String(item.content || '').toLowerCase().includes(searchTerm));
+    // "app:code invoice" -> only clips copied from an app matching "code", containing "invoice"
+    let searchTerm = search.toLowerCase();
+    let appFilter = '';
+    const m = searchTerm.match(/^app:(\S*)\s*(.*)$/);
+    if (m) { appFilter = m[1]; searchTerm = m[2]; }
+    items = items.filter(item => {
+      if (appFilter && !String(item.source_app || '').toLowerCase().includes(appFilter)) return false;
+      if (!searchTerm) return true;
+      if (item.sensitive) return false; // secrets never show up in search results
+      const body = item.type === 'image' ? item.ocr_text : item.content; // images: search the OCR text
+      return (String(body || '') + ' ' + String(item.source_app || '')).toLowerCase().includes(searchTerm);
+    });
   }
   items.sort((a, b) => {
     if (b.pinned !== a.pinned) return b.pinned - a.pinned;
     return b.created_at - a.created_at;
   });
   return items.slice(0, limit);
+}
+
+/** Active, unpinned, non-snippet clips (what the history limit counts). */
+function countUnpinned() {
+  return data.items.filter(i => i.trashed === 0 && i.pinned !== 1 && i.type !== 'snippet').length;
+}
+
+/** Keeps storage bounded: drops the oldest unpinned clips beyond `keep` (callers pass ~3x the plan limit). */
+function enforceRetention(keep) {
+  if (!(keep > 0)) return 0;
+  const un = data.items.filter(i => i.trashed === 0 && i.pinned !== 1 && i.type !== 'snippet').sort((a, b) => b.created_at - a.created_at);
+  if (un.length <= keep) return 0;
+  const drop = new Set(un.slice(keep).map(i => i.id));
+  data.items = data.items.filter(i => !drop.has(i.id));
+  saveData();
+  return drop.size;
 }
 
 function getTrashCount() {
@@ -119,6 +168,7 @@ function togglePin(id) {
   const item = data.items.find(item => item.id === id);
   if (!item) return false;
   item.pinned = item.pinned === 1 ? 0 : 1;
+  if (item.pinned === 1) unmask(item);
   item.updated_at = Date.now();
   saveData();
   return true;
@@ -164,7 +214,7 @@ function bulk(action, ids = []) {
       if (!hit) return;
       if (action === 'trash' || action === 'clearUnpinned') i.trashed = 1;
       else if (action === 'restore') i.trashed = 0;
-      else if (action === 'pin') i.pinned = 1;
+      else if (action === 'pin') { i.pinned = 1; unmask(i); }
       else if (action === 'unpin') i.pinned = 0;
       else return;
       i.updated_at = now;
@@ -203,6 +253,26 @@ function updateContent(id, content) {
   return item;
 }
 
+/** Deletes secrets whose time is up. Returns the removed items (so the caller can wipe the OS clipboard too). */
+function purgeExpired() {
+  const now = Date.now();
+  const gone = data.items.filter(i => i.expires_at && i.expires_at <= now);
+  if (!gone.length) return [];
+  data.items = data.items.filter(i => !(i.expires_at && i.expires_at <= now));
+  saveData();
+  return gone;
+}
+
+/** Stores text found inside an image clip (empty string = scanned, nothing found). */
+function setOcrText(id, text) {
+  const item = data.items.find(i => i.id === id);
+  if (!item) return false;
+  item.ocr_text = String(text || '');
+  item.ocr_done = true;
+  saveData();
+  return true;
+}
+
 function getSnippets() {
   return [...data.snippets].sort((a, b) => b.created_at - a.created_at);
 }
@@ -214,6 +284,7 @@ function insertSnippet(snippet) {
     title: snippet.title,
     content: snippet.content,
     folder: snippet.folder || 'General',
+    trigger: snippet.trigger || '',
     created_at: snippet.created_at || Date.now()
   };
   data.snippets.push(newSnippet);
@@ -243,6 +314,8 @@ module.exports = {
   isDuplicateOfLatest,
   getItem,
   getItems,
+  countUnpinned,
+  enforceRetention,
   getTrashCount,
   getPinned,
   togglePin,
@@ -251,6 +324,8 @@ module.exports = {
   bulk,
   updateTags,
   updateContent,
+  purgeExpired,
+  setOcrText,
   getSnippets,
   insertSnippet,
   deleteSnippet

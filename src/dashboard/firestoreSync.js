@@ -41,6 +41,83 @@ let sourceTag = 'desktop:' + (globalThis.crypto?.randomUUID?.() || Math.random()
 const cid = () => globalThis.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random());
 const norm = (s) => String(s ?? '').replace(/\r\n/g, '\n').trim();
 
+// ---------- end-to-end encryption ----------
+// Wire format (the phone app must implement the same):
+//   users/{uid}/meta/crypto : { v:1, salt:<b64 16 bytes>, iter:250000, check:<payload> }
+//   key     = PBKDF2-SHA256(passphrase, salt, iter) -> AES-GCM-256
+//   payload = base64( iv(12 bytes) || AES-GCM ciphertext ) of JSON text
+//   clipboard_items doc = { v:2, type, payload:{content,preview,char_count}, created_at, source, client_id, serverAt }
+const PBKDF2_ITER = 250000;
+const MAX_PAYLOAD_CHARS = 900000; // Firestore documents are capped at 1 MiB
+let cryptoKey = null;
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+function toB64(buf) {
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function fromB64(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+async function deriveKey(pass, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base,
+    { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+}
+async function encryptWith(key, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj))));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return toB64(out);
+}
+async function decryptWith(key, payload) {
+  const raw = fromB64(payload);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, key, raw.slice(12));
+  return JSON.parse(dec.decode(pt));
+}
+const importKey = (b64) => crypto.subtle.importKey('raw', fromB64(b64), 'AES-GCM', true, ['encrypt', 'decrypt']);
+function announceCrypto(on) { window.dispatchEvent(new CustomEvent('clipsync:crypto', { detail: { on } })); }
+
+async function wipeCloudHistory(uid) {
+  const snap = await getDocs(collection(db, 'users', uid, 'clipboard_items'));
+  await Promise.all(snap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+}
+
+/** Loads / creates this account's key. Returns false if the user skips (sync stays paused, nothing is uploaded). */
+async function ensureKey(uid) {
+  cryptoKey = null; announceCrypto(false);
+  const metaRef = doc(db, 'users', uid, 'meta', 'crypto');
+  let meta = (await getDoc(metaRef)).data() || null;
+  if (currentUid !== uid) return false;
+
+  const stored = await window.clipdows.vaultLoad(uid);
+  if (stored && meta) {
+    try { const k = await importKey(stored); await decryptWith(k, meta.check); cryptoKey = k; announceCrypto(true); return true; }
+    catch { await window.clipdows.vaultClear(uid); }
+  }
+  let err = '';
+  for (;;) {
+    const res = await window.clipVaultPrompt(meta ? 'unlock' : 'create', err);
+    if (currentUid !== uid || !res) return false;
+    if (res.reset) { await wipeCloudHistory(uid); await deleteDoc(metaRef).catch(() => {}); meta = null; err = ''; continue; }
+    if (!meta) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveKey(res.pass, salt, PBKDF2_ITER);
+      meta = { v: 1, salt: toB64(salt), iter: PBKDF2_ITER, check: await encryptWith(key, { ok: 'clipdows' }) };
+      await setDoc(metaRef, meta);
+      cryptoKey = key;
+    } else {
+      try {
+        const key = await deriveKey(res.pass, fromB64(meta.salt), meta.iter || PBKDF2_ITER);
+        await decryptWith(key, meta.check);
+        cryptoKey = key;
+      } catch { err = 'Wrong passphrase. Try again.'; continue; }
+    }
+    window.clipdows.vaultSave(uid, toB64(await crypto.subtle.exportKey('raw', cryptoKey)));
+    announceCrypto(true);
+    return true;
+  }
+}
+
 // ---------- seen ids (persisted per account) ----------
 const seen = new Set();
 let baselineNeeded = true; // first run for THIS account: mark existing cloud items as seen instead of re-importing them
@@ -78,6 +155,18 @@ function randomCode() {
   return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 }
 
+// Plan limit: keep only the newest `cap` items in the cloud (throttled; server-side enforcement comes with payments).
+let lastPrune = 0;
+async function pruneCloud(uid, cap) {
+  const now = Date.now();
+  if (now - lastPrune < 15000) return;
+  lastPrune = now;
+  try {
+    const snap = await getDocs(query(collection(db, 'users', uid, 'clipboard_items'), orderBy('serverAt', 'desc'), limit(cap + 30)));
+    await Promise.all(snap.docs.slice(cap).map((d) => deleteDoc(d.ref).catch(() => {})));
+  } catch (err) { console.warn('[firestoreSync] prune failed:', err.message); }
+}
+
 function registerPushHandler() {
   if (pushHandlerRegistered) return;
   pushHandlerRegistered = true;
@@ -89,17 +178,21 @@ function registerPushHandler() {
     const now = Date.now();
     if (key === lastPush.key && now - lastPush.at < 3000) return; // watcher fired twice for one copy
     lastPush = { key, at: now };
+    if (!cryptoKey) return; // locked: never upload plaintext
     try {
+      const payload = await encryptWith(cryptoKey, { content: item.content, preview: item.preview, char_count: item.char_count });
+      if (payload.length > MAX_PAYLOAD_CHARS) { console.warn('[firestoreSync] item too large to sync, skipped'); return; }
+      const uidAtPush = currentUid;
       await addDoc(collection(db, 'users', currentUid, 'clipboard_items'), {
+        v: 2,
         type: item.type,
-        content: item.content,
-        preview: item.preview,
-        char_count: item.char_count,
+        payload,
         created_at: item.created_at || now,
         source: sourceTag,
         client_id: cid(),
         serverAt: serverTimestamp(),
       });
+      if (item.syncCap > 0) pruneCloud(uidAtPush, item.syncCap);
     } catch (err) {
       console.error('[firestoreSync] failed to push item to cloud:', err);
     }
@@ -115,7 +208,11 @@ export function startClipSync(uid) {
   receivedFromPhone.clear();
   lastPush = { key: '', at: 0 };
   registerPushHandler();
+  ensureKey(uid).then((ok) => { if (ok && currentUid === uid) listenForItems(uid); })
+    .catch((err) => console.error('[firestoreSync] could not set up encryption:', err));
+}
 
+function listenForItems(uid) {
   // Firestore -> desktop: anything a paired phone sends lands here in real time.
   const itemsQuery = query(
     collection(db, 'users', uid, 'clipboard_items'),
@@ -149,18 +246,37 @@ export function startClipSync(uid) {
       if (data.source === sourceTag) return;                              // our own write
       if (data.source && data.source.startsWith('desktop:')) return;      // another desktop, not a phone
 
-      rememberReceived(data); // BEFORE handing it to the app, which may write it to the clipboard
-      window.clipdows.reportCloudItem({
-        id,
-        type: data.type,
-        content: data.content,
-        preview: data.preview,
-        char_count: data.char_count,
-        created_at: data.created_at || Date.now(),
-      });
+      (async () => {
+        let d = data;
+        if (data.payload) {
+          try { d = { ...data, ...(await decryptWith(cryptoKey, data.payload)) }; }
+          catch { console.warn('[firestoreSync] could not decrypt an item (different key?)'); return; }
+        } // else: legacy plaintext item (phone app not updated yet) — still accepted
+        rememberReceived(d); // BEFORE handing it to the app, which may write it to the clipboard
+        window.clipdows.reportCloudItem({
+          id,
+          type: d.type,
+          content: d.content,
+          preview: d.preview,
+          char_count: d.char_count,
+          created_at: d.created_at || Date.now(),
+        });
+      })();
     });
     saveSeen();
   }, (err) => console.error('[firestoreSync] items listener error:', err));
+}
+
+/** Re-shows the passphrase prompt after the user skipped it. */
+export function resumeClipSync() { const u = currentUid; if (!u) return; currentUid = null; startClipSync(u); }
+
+/** Deletes cloud items that were uploaded before encryption existed (no `payload`). */
+export async function purgePlaintext() {
+  if (!currentUid) return 0;
+  const snap = await getDocs(collection(db, 'users', currentUid, 'clipboard_items'));
+  const old = snap.docs.filter((d) => !d.data().payload);
+  await Promise.all(old.map((d) => deleteDoc(d.ref).catch(() => {})));
+  return old.length;
 }
 
 export function stopClipSync() {
@@ -168,6 +284,8 @@ export function stopClipSync() {
   unsubItems = null;
   cancelPairing();
   currentUid = null;
+  cryptoKey = null;
+  announceCrypto(false);
 }
 
 /**
@@ -246,4 +364,4 @@ export async function renameDevice(phoneUid, name) {
 
 // dashboard.js is a plain (non-module) script, so expose everything it needs
 // on window rather than making it deal with ESM imports.
-window.clipSync = { startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };
+window.clipSync = { resumeClipSync, purgePlaintext, isUnlocked: () => !!cryptoKey, startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };
