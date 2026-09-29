@@ -1,4 +1,15 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage, Notification, safeStorage, clipboard } = require('electron');
+process.on('uncaughtException', (err) => console.error('[main] uncaught:', err));
+process.on('unhandledRejection', (err) => console.error('[main] unhandled rejection:', err));
+
+// Only one ClipDows may run (two would each capture the clipboard). Launching it a second
+// time (e.g. clicking the shortcut while it's running hidden in the tray) just opens the window.
+const gotInstanceLock = app.requestSingleInstanceLock();
+if (!gotInstanceLock) app.quit();
+let isQuitting = false;
+app.on('before-quit', () => { isQuitting = true; });
+// Windows starts us at login with this flag so we can stay out of the way (tray only).
+const LAUNCHED_HIDDEN = process.argv.includes('--hidden');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -56,9 +67,13 @@ function createPopupWindow() {
   });
 }
 
-function createDashboardWindow() {
+function createDashboardWindow(opts) {
+  // Tray menu items call this with a menu-item object, so only an explicit { hidden: true } counts.
+  const startHidden = !!(opts && opts.hidden === true);
   if (dashboardWindow) {
+    if (startHidden) return;
     dashboardWindow.show();
+    if (dashboardWindow.isMinimized()) dashboardWindow.restore();
     dashboardWindow.focus();
     return;
   }
@@ -81,14 +96,23 @@ function createDashboardWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false, // the hidden window keeps the sign-in and phone sync running
     },
   });
 
   dashboardWindow.loadFile(path.join(__dirname, '..', 'dashboard', 'dashboard.html'));
 
   dashboardWindow.once('ready-to-show', () => {
-    dashboardWindow.show();
+    if (!startHidden) dashboardWindow.show();
   });
+
+  // Closing the window keeps ClipDows running in the tray (capture + phone sync continue).
+  // Without a tray icon there'd be no way back to a hidden window, so then it really closes.
+  dashboardWindow.on('close', (e) => {
+    if (!isQuitting && tray) { e.preventDefault(); dashboardWindow.hide(); }
+  });
+  // Windows shutdown / log-off must never be blocked by the close-to-tray rule above.
+  dashboardWindow.on('session-end', () => { isQuitting = true; });
 
   dashboardWindow.on('closed', () => {
     dashboardWindow = null;
@@ -203,7 +227,10 @@ function registerShortcuts() {
   }
 }
 
+app.on('second-instance', () => { if (app.isReady()) createDashboardWindow(); });
+
 app.whenReady().then(() => {
+  if (!gotInstanceLock) return; // a copy is already running; this one is exiting
   app.setAppUserModelId('com.ayushmanbuilds.clipdows'); // needed for Windows notifications
   if (app.isPackaged) Menu.setApplicationMenu(null);
   createTray();
@@ -225,6 +252,10 @@ app.whenReady().then(() => {
     if (newItem.type === 'image' && prefs.ocr) ocr.enqueue(newItem, () => notifyItemsChanged(null));
   });
   setInterval(purgeSensitive, 5000); // auto-expire secrets
+
+  // The dashboard window is what restores the sign-in and runs the phone sync, so it must exist
+  // from the start. At Windows login it stays hidden (tray only); a normal launch shows it.
+  createDashboardWindow({ hidden: LAUNCHED_HIDDEN });
 }).catch((err) => {
   console.error('[main] Failed to start ClipDows:', err);
 });
@@ -362,6 +393,29 @@ ipcMain.handle('items:copyOnly', (_evt, id) => {
   return { ok: true };
 });
 
+// Saves an image clip straight into the user's Downloads folder (unique file name, never overwrites).
+ipcMain.handle('items:saveImage', (_evt, id) => {
+  try {
+    const row = db.getItem(id);
+    if (!row || row.type !== 'image') return { ok: false, error: 'Not an image' };
+    const m = /^data:image\/([\w+.-]+);base64,(.+)$/.exec(row.content || '');
+    if (!m) return { ok: false, error: 'Image data missing' };
+    let ext = m[1].toLowerCase().replace(/\+.*$/, '');
+    if (ext === 'jpeg') ext = 'jpg';
+    const d = new Date(row.created_at || Date.now());
+    const p2 = (n) => String(n).padStart(2, '0');
+    const base = `ClipDows-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    const dir = app.getPath('downloads');
+    let file = path.join(dir, `${base}.${ext}`);
+    for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${base} (${n}).${ext}`);
+    fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
+    return { ok: true, name: path.basename(file), dir };
+  } catch (err) {
+    console.warn('[main] saveImage failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('items:togglePin', (_evt, id) => {
   const cur = db.getItem(id);
   const maxPins = plan.limits().pinned;
@@ -441,7 +495,7 @@ ipcMain.on('settings:apply', (_evt, s) => {
   const L = plan.limits();
   prefs.set({ ...s, ignoredApps: L.appFilter ? s.ignoredApps : '', secretTtl: L.customExpiry ? s.secretTtl : 0 }); // Pro features
   try {
-    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!s.startup });
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!s.startup, args: ['--hidden'] });
     if (s.tray === false && tray) { tray.destroy(); tray = null; }
     else if (s.tray !== false && !tray) createTray();
     if (dashboardWindow) {

@@ -167,6 +167,26 @@ async function pruneCloud(uid, cap) {
   } catch (err) { console.warn('[firestoreSync] prune failed:', err.message); }
 }
 
+// ---------- plan -> phone ----------
+// Publishes this account's plan to users/{uid}/meta/plan so the phone app can unlock the same features.
+// The phone only reads it (Firestore rules: owner-only write). Trial/subscription expiry is evaluated on the phone.
+let planToPublish = null;
+let lastPlanSig = '';
+async function flushPlan() {
+  if (!currentUid || !planToPublish) return;
+  const i = planToPublish;
+  const body = {
+    tier: i.tier, paidTier: i.paidTier || null, paidUntil: i.paidTier ? (i.paidUntil || 0) : 0,
+    trialEndsAt: i.trialEndsAt || 0, dev: !!(i.dev && i.devTier), devTier: (i.dev && i.devTier) || '',
+  };
+  const sig = currentUid + '|' + JSON.stringify(body);
+  if (sig === lastPlanSig) return;
+  lastPlanSig = sig;
+  try { await setDoc(doc(db, 'users', currentUid, 'meta', 'plan'), { ...body, updatedAt: Date.now() }); }
+  catch (err) { lastPlanSig = ''; console.warn('[firestoreSync] could not publish plan:', err.message); }
+}
+function publishPlan(info) { if (!info) return; planToPublish = info; flushPlan(); }
+
 function registerPushHandler() {
   if (pushHandlerRegistered) return;
   pushHandlerRegistered = true;
@@ -204,6 +224,9 @@ export function startClipSync(uid) {
   if (currentUid === uid) return;
   stopClipSync();
   currentUid = uid;
+  lastPlanSig = '';
+  if (planToPublish) flushPlan();
+  else if (window.clipdows && window.clipdows.getPlan) window.clipdows.getPlan().then(publishPlan).catch(() => {});
   loadSeen(uid);            // this account's own "already imported" list
   receivedFromPhone.clear();
   lastPush = { key: '', at: 0 };
@@ -364,4 +387,4 @@ export async function renameDevice(phoneUid, name) {
 
 // dashboard.js is a plain (non-module) script, so expose everything it needs
 // on window rather than making it deal with ESM imports.
-window.clipSync = { resumeClipSync, purgePlaintext, isUnlocked: () => !!cryptoKey, startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };
+window.clipSync = { publishPlan, resumeClipSync, purgePlaintext, isUnlocked: () => !!cryptoKey, startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };

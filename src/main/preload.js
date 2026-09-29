@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('clipdows', {
   getItems: (opts) => ipcRenderer.invoke('items:get', opts),
   pasteItem: (id) => ipcRenderer.invoke('items:paste', id),
   copyOnly: (id) => ipcRenderer.invoke('items:copyOnly', id),
+  saveImage: (id) => ipcRenderer.invoke('items:saveImage', id),
   togglePin: (id) => ipcRenderer.invoke('items:togglePin', id),
   trashItem: (id) => ipcRenderer.invoke('items:trash', id),
   updateTags: (id, tags) => ipcRenderer.invoke('items:updateTags', { id, tags }),

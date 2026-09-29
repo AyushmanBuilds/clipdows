@@ -161,6 +161,19 @@ signOutBtn.addEventListener('click', async () => {
   try { await window.clipAuth.signOut(); } catch (err) { console.error(err); }
 });
 
+// ---------- one-time notice: ClipDows starts with Windows and keeps running in the tray ----------
+const BG_NOTICE_KEY = 'clipdows:bgNoticeSeen:v1';
+function maybeShowBgNotice() {
+  try { if (localStorage.getItem(BG_NOTICE_KEY)) return; } catch (e) { /* show it anyway */ }
+  $('bgNoticeModal').hidden = false;
+}
+function closeBgNotice() {
+  try { localStorage.setItem(BG_NOTICE_KEY, String(Date.now())); } catch (e) { /* ignore */ }
+  $('bgNoticeModal').hidden = true;
+}
+$('bgNoticeOk').addEventListener('click', closeBgNotice);
+$('bgNoticeSettings').addEventListener('click', () => { closeBgNotice(); openSettings(); });
+
 async function applyUser(user) {
   if (user) {
     const name = user.displayName || (user.email || '').split('@')[0];
@@ -176,6 +189,7 @@ async function applyUser(user) {
     appRoot.hidden = false;
     refresh();
     if (window.clipSync) { window.clipSync.startClipSync(user.uid); loadDevices(); }
+    maybeShowBgNotice();
   } else {
     appRoot.hidden = true;
     onboarding.hidden = false;
@@ -224,7 +238,7 @@ const gridViewBtn = $('gridViewBtn'), listViewBtn = $('listViewBtn');
 const selectModeBtn = $('selectModeBtn'), selBar = $('selBar'), selCount = $('selCount');
 const selAll = $('selAll'), selPin = $('selPin'), selRestore = $('selRestore'), selDelete = $('selDelete');
 const detailPanel = $('detailPanel'), detailBody = $('detailBody'), detailCount = $('detailCount');
-const detailPin = $('detailPin'), detailEdit = $('detailEdit'), detailShare = $('detailShare');
+const detailPin = $('detailPin'), detailEdit = $('detailEdit'), detailShare = $('detailShare'), detailDownload = $('detailDownload');
 const detailTrash = $('detailTrash'), detailPaste = $('detailPaste');
 const tagChips = $('tagChips'), tagAddBtn = $('tagAddBtn'), tagInput = $('tagInput');
 const settingsModal = $('settingsModal'), accentRow = $('accentRow');
@@ -372,6 +386,7 @@ function applyPlanUI() {
   $('timeMachineBtn').classList.toggle('plan-locked', !planInfo.limits.timeMachine);
   renderPricing();
   applySettings(); // re-send plan-gated settings (ignored apps, secret expiry) to the main process
+  if (window.clipSync && window.clipSync.publishPlan) window.clipSync.publishPlan(planInfo); // keep the phone app on the same plan
   if (!appRoot.hidden) refresh();
 }
 window.clipdows.onPlanChanged((info) => { planInfo = info; applyPlanUI(); });
@@ -812,6 +827,7 @@ function paintDetailTools(item) {
   detailEdit.classList.remove('active-state');
   detailEdit.hidden = t || item.type === 'image';
   detailShare.hidden = t;
+  detailDownload.hidden = t || item.type !== 'image';
   detailPaste.hidden = t;
   detailPin.classList.toggle('pinned-active', !t && !!item.pinned);
   tagAddBtn.hidden = t;
@@ -930,6 +946,12 @@ detailShare.addEventListener('click', async () => {
   if (!selectedItem) return;
   await window.clipdows.copyOnly(selectedItem.id);
   showToast('Copied for sharing', 'Paste it anywhere to share this item');
+});
+detailDownload.addEventListener('click', async () => {
+  if (!selectedItem || selectedItem.type !== 'image') return;
+  const r = await window.clipdows.saveImage(selectedItem.id);
+  if (r && r.ok) showToast('Image saved to Downloads', r.name);
+  else showToast('Could not save image', (r && r.error) || 'Try again');
 });
 detailEdit.addEventListener('click', async () => {
   if (!selectedItem || selectedItem.type === 'image') return;

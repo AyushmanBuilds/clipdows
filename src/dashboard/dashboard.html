@@ -162,6 +162,7 @@
       <div class="detail-tools">
         <button class="tool-btn" id="detailEdit"><i data-i="edit"></i><span>Edit</span></button>
         <button class="tool-btn" id="detailPin"><i data-i="pin"></i><span>Pin</span></button>
+        <button class="tool-btn" id="detailDownload" hidden><i data-i="download"></i><span>Download</span></button>
         <button class="tool-btn" id="detailShare"><i data-i="share"></i><span>Share</span></button>
         <button class="tool-btn danger" id="detailTrash"><i data-i="trash"></i><span>Delete</span></button>
       </div>
@@ -381,6 +382,19 @@
       <div class="modal-actions">
         <button class="ghost-btn" id="confirmCancel">Cancel</button>
         <button class="primary-btn" id="confirmOk">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="bgNoticeModal" hidden>
+    <div class="modal small-modal confirm">
+      <h2>ClipDows runs in the background</h2>
+      <p>To keep your history, ClipDows starts with Windows and keeps running in the system tray, even after you close its window. It saves the text and images you copy while you are signed in. Passwords from password managers are ignored, and anything detected as a secret is hidden and never sent to your phone.</p>
+      <p>Your history is stored on this PC. If sync is set up, new clips are encrypted with your passphrase and sent to your ClipDows account so your phone can show them.</p>
+      <p>You can turn this off any time in Settings &rsaquo; General (&ldquo;Start on Windows startup&rdquo;), or quit ClipDows from the tray icon.</p>
+      <div class="modal-actions">
+        <button class="ghost-btn" id="bgNoticeSettings">Open settings</button>
+        <button class="primary-btn" id="bgNoticeOk">Got it</button>
       </div>
     </div>
   </div>

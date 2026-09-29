@@ -1,6 +1,7 @@
 // Offline OCR for image clips, so search can find text inside screenshots.
 // tesseract.js runs entirely on this PC (language data is downloaded once, then cached).
 const path = require('path');
+const fs = require('fs');
 const { app } = require('electron');
 const db = require('./db');
 const plan = require('./plan');
@@ -15,11 +16,25 @@ let running = false;
 const queue = [];
 let notify = () => {};
 
+/** Folder holding eng.traineddata.gz (unpacked from the asar when installed). */
+function bundledLangPath() {
+  const dev = path.join(__dirname, '..', '..', 'assets', 'tessdata');
+  const unpacked = dev.replace('app.asar', 'app.asar.unpacked');
+  if (fs.existsSync(path.join(unpacked, 'eng.traineddata.gz'))) return unpacked;
+  if (fs.existsSync(path.join(dev, 'eng.traineddata.gz'))) return dev;
+  return undefined; // fall back to tesseract's default (downloads once, then cached)
+}
+
 function getWorker() {
   if (!workerPromise) {
     const { createWorker } = require('tesseract.js');
-    workerPromise = createWorker(LANG, 1, { cachePath: path.join(app.getPath('userData'), 'tessdata') })
-      .catch((err) => { workerPromise = null; throw err; });
+    workerPromise = createWorker(LANG, 1, {
+      langPath: bundledLangPath(),                       // English data ships with the app -> works fully offline
+      cachePath: path.join(app.getPath('userData'), 'tessdata'),
+      // Without this, a worker error (e.g. no internet) becomes an uncaught exception
+      // in the main process and freezes the whole app behind an error box.
+      errorHandler: (err) => console.warn('[ocr] worker error:', err),
+    }).catch((err) => { workerPromise = null; throw err; });
   }
   return workerPromise;
 }

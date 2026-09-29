@@ -53,6 +53,8 @@ function info() {
     paid, paidUntil: paid ? state.paidUntil : 0,
     trial: t === 'pro' && !paid && !(!app.isPackaged && state.devTier),
     trialDaysLeft: trialDaysLeft(),
+    trialEndsAt: state.trialStart ? state.trialStart + TRIAL_DAYS * DAY : 0, // the phone app mirrors the plan from these
+    paidTier: paid ? state.paidTier : null,
     limits: LIMITS[t],
     dev: !app.isPackaged,
     devTier: state.devTier || '',
