@@ -25,6 +25,7 @@ const ocr = require('./ocr');
 const plan = require('./plan');
 const snippets = require('./snippets');
 const triggers = require('./triggers');
+const updater = require('./updater');
 
 let popupWindow = null;
 let dashboardWindow = null;
@@ -161,7 +162,7 @@ function createTray() {
     { label: `Paste Stack: start / stop  (${STACK_TOGGLE_KEY})`, click: toggleStack },
     { type: 'separator' },
     { label: 'Settings', click: createDashboardWindow },
-    { label: 'Check for Updates', click: () => {} },
+    { label: 'Check for Updates', click: () => updater.checkNow() },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);
@@ -256,6 +257,8 @@ app.whenReady().then(() => {
   // The dashboard window is what restores the sign-in and runs the phone sync, so it must exist
   // from the start. At Windows login it stays hidden (tray only); a normal launch shows it.
   createDashboardWindow({ hidden: LAUNCHED_HIDDEN });
+
+  updater.init({ icon: loadAppIcon(), beforeInstall: () => { isQuitting = true; } });
 }).catch((err) => {
   console.error('[main] Failed to start ClipDows:', err);
 });

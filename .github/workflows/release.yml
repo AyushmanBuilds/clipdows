@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # googleConfig.js is gitignored, so recreate it from repo secrets.
+      - name: Write googleConfig.js
+        shell: bash
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          cat > src/main/googleConfig.js <<JS
+          module.exports = {
+            GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}',
+            GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}',
+          };
+          JS
+
+      - run: npm ci
+
+      - name: Build and publish installer
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

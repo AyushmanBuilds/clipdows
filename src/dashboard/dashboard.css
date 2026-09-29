@@ -449,3 +449,28 @@ kbd{font:600 11.5px "Segoe UI",sans-serif;padding:2px 7px;border-radius:6px;back
 .plan-renew:disabled{opacity:.5;cursor:progress}
 .plan-card.max .plan-renew{color:#A9B0C4}
 .plan-card.max .plan-renew:hover{color:#E8C27A}
+
+/* ---------- Referral tab ---------- */
+.ref-hero{display:flex;align-items:center;gap:16px;padding:20px 22px;border-radius:20px;background:var(--grad);color:#fff;margin:6px 0 18px;box-shadow:0 10px 30px color-mix(in srgb,var(--accent-2) 30%,transparent)}
+.ref-hero h3{font-size:22px;font-weight:750;letter-spacing:-.02em}
+.ref-hero p{font-size:13px;opacity:.92;margin-top:4px;max-width:430px;line-height:1.45}
+.ref-hero .pricing-status{margin-left:auto;background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.32);color:#fff}
+.ref-hero .pricing-status b{color:#fff}
+.ref-gift{flex:none;width:54px;height:54px;border-radius:17px;background:rgba(255,255,255,.2);display:grid;place-items:center}
+.ref-gift i{display:inline-block;width:28px;height:28px}
+.ref-card{padding:20px;border-radius:18px;background:var(--surface-2);border:1px solid var(--border)}
+.ref-label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;letter-spacing:.08em}
+.ref-row{display:flex;gap:10px}
+.ref-input{height:48px;font-size:15px;font-weight:600;letter-spacing:.03em;flex:1}
+.ref-btn{width:auto;flex:none;padding:0 30px}
+.ref-msg{margin-top:14px;padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.45;display:flex;gap:10px;align-items:flex-start;animation:refpop .28s both}
+.ref-msg i{flex:none;width:18px;height:18px;display:inline-block;margin-top:1px}
+.ref-msg b{display:block;font-size:14px;margin-bottom:1px}
+.ref-msg.err{background:color-mix(in srgb,var(--danger) 10%,transparent);color:var(--danger)}
+.ref-msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);color:var(--ok)}
+.ref-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+.ref-step{padding:14px;border-radius:14px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;line-height:1.45;color:var(--muted)}
+.ref-step b{display:block;color:var(--text);font-size:13px;margin-bottom:3px}
+.ref-step .n{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--soft);color:var(--accent);font-weight:700;font-size:12px;margin-bottom:8px}
+@keyframes refpop{from{opacity:0;transform:translateY(6px) scale(.98)}}
+@media (max-width:920px){.ref-steps{grid-template-columns:1fr}.ref-hero{flex-wrap:wrap}.ref-hero .pricing-status{margin-left:0}}

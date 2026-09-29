@@ -176,6 +176,7 @@
         <div class="set-title">Settings</div>
         <button class="set-nav-item active" data-pane="general"><i data-i="gear"></i>General</button>
         <button class="set-nav-item" data-pane="pricing"><i data-i="crown"></i>Pricing</button>
+        <button class="set-nav-item" data-pane="referral"><i data-i="gift"></i>Referral</button>
         <button class="set-nav-item" data-pane="shortcuts"><i data-i="keyboard"></i>Shortcuts</button>
         <button class="set-nav-item" data-pane="sync"><i data-i="cloud"></i>Sync &amp; Devices</button>
         <button class="set-nav-item" data-pane="privacy"><i data-i="shield"></i>Privacy</button>
@@ -218,6 +219,27 @@
             <h4 class="compare-title">Compare plans</h4>
             <div class="compare" id="compareTable"></div>
             <p class="pricing-foot">Payments are processed securely by Razorpay. ClipDows never sees or stores your card details.</p>
+          </section>
+
+          <section class="set-pane" data-pane="referral" hidden>
+            <div class="ref-hero">
+              <span class="ref-gift"><i data-i="gift"></i></span>
+              <div><h3>Have a referral code?</h3><p>Redeem it here to unlock Pro or Max on your account.</p></div>
+              <span class="pricing-status" id="refStatus"></span>
+            </div>
+            <div class="ref-card">
+              <label class="ref-label" for="refInput">REFERRAL CODE</label>
+              <div class="ref-row">
+                <input class="field ref-input" id="refInput" type="text" placeholder="Enter your code" autocomplete="off" spellcheck="false" />
+                <button class="primary-btn ref-btn" id="refBtn" type="button">Redeem</button>
+              </div>
+              <div class="ref-msg" id="refMsg" hidden></div>
+            </div>
+            <div class="ref-steps">
+              <div class="ref-step"><span class="n">1</span><b>Get a code</b>Ask the person who invited you, or find one in a giveaway.</div>
+              <div class="ref-step"><span class="n">2</span><b>Paste it above</b>Codes are not case sensitive.</div>
+              <div class="ref-step"><span class="n">3</span><b>Enjoy your plan</b>Your paired phone updates automatically.</div>
+            </div>
           </section>
 
           <section class="set-pane" data-pane="shortcuts" hidden>
@@ -408,7 +430,9 @@
 
   <script type="module" src="firebase-auth.js"></script>
   <script type="module" src="firestoreSync.js"></script>
+  <script type="module" src="presence.js"></script>
   <script src="actions.js"></script>
   <script src="dashboard.js"></script>
+  <script src="privacy-note.js"></script>
 </body>
 </html>

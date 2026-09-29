@@ -36,6 +36,7 @@ const PATHS = {
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 8l4 4-4 4M19 12H9"/>',
   zap: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
   crown: '<path d="m3 8 4.5 4L12 5l4.5 7L21 8l-2 11H5z"/><path d="M5 19h14"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
 };
 const svg = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${PATHS[n] || ''}</svg>`;
 function hydrate(root = document) { root.querySelectorAll('i[data-i]').forEach((el) => { el.innerHTML = svg(el.dataset.i); }); }
@@ -389,7 +390,7 @@ function applyPlanUI() {
   if (window.clipSync && window.clipSync.publishPlan) window.clipSync.publishPlan(planInfo); // keep the phone app on the same plan
   if (!appRoot.hidden) refresh();
 }
-window.clipdows.onPlanChanged((info) => { planInfo = info; applyPlanUI(); });
+window.clipdows.onPlanChanged((info) => { planInfo = info; applyPlanUI(); renderReferral(); });
 $('devPlanSel').addEventListener('change', async (e) => { planInfo = await window.clipdows.setDevPlan(e.target.value); applyPlanUI(); });
 
 // ---------- pricing tab ----------
@@ -431,7 +432,7 @@ function renderPricing() {
   const curIdx = PLAN_ORDER.indexOf(cur);
   const label = { free: 'Free', pro: trial ? 'Pro trial' : 'Pro', max: 'Max' }[cur];
   const paidNow = !!(planInfo && planInfo.paid && planInfo.paidUntil);
-  $('pricingStatus').innerHTML = `Current plan: <b>${label}</b>` + (trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : paidNow ? ` &middot; active until ${planDate(planInfo.paidUntil)}` : '');
+  $('pricingStatus').innerHTML = `Current plan: <b>${label}</b>` + (trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : paidNow ? (isLifetime(planInfo.paidUntil) ? ' &middot; Lifetime access' : ` &middot; active until ${planDate(planInfo.paidUntil)}`) : '');
 
   grid.innerHTML = PLAN_ORDER.map((t, i) => {
     const d = PLAN_DEFS[t];
@@ -444,7 +445,7 @@ function renderPricing() {
     if (isCur) btn = `<button class="plan-btn cur" disabled><i data-i="check"></i>Current</button>`;
     else if (i < curIdx || (trial && t === 'free')) btn = `<button class="plan-btn dim" disabled>Included</button>`;
     else btn = `<button class="plan-btn ${t === 'max' ? 'gold' : 'buy'}" data-buy="${t}">Buy Now<span class="pb-price">&middot; &#8377;${d.price} / month</span></button>`;
-    const renew = isCur && paidNow && t !== 'free' ? `<button class="plan-renew" data-buy="${t}">Extend by 30 days &middot; &#8377;${d.price}</button>` : '';
+    const renew = isCur && paidNow && t !== 'free' && !isLifetime(planInfo.paidUntil) ? `<button class="plan-renew" data-buy="${t}">Extend by 30 days &middot; &#8377;${d.price}</button>` : '';
     return `<article class="plan-card ${t === 'pro' ? 'featured' : ''} ${t}">${flag}
       <div class="plan-head"><span class="plan-ico"><i data-i="${d.icon}"></i></span><div><div class="plan-name">${d.name}</div><div class="plan-tag">${d.tag}</div></div></div>
       <div class="plan-price"><span class="plan-amt"><small>&#8377;</small>${d.price}</span><span class="plan-per">${d.price ? '/ month' : 'forever'}</span></div>
@@ -460,6 +461,52 @@ function renderPricing() {
       g.rows.map((r) => `<div class="cmp-row"><span>${r[0]}</span>${cell(r[1], 'free')}${cell(r[2], 'pro')}${cell(r[3], 'max')}</div>`).join('')).join('');
   hydrate(grid); hydrate(table);
 }
+// ---------- Referral codes ----------
+// The server checks the code and writes the plan; this side only sends the text and shows the result.
+const LIFETIME_MS = 32503680000000; // anything past year 3000 means "lifetime"
+function isLifetime(ms) { return Number(ms) >= LIFETIME_MS; }
+let redeemBusy = false;
+function renderReferral() {
+  const st = $('refStatus'); if (!st) return;
+  const cur = planInfo ? planInfo.tier : 'free';
+  const trial = !!(planInfo && planInfo.trial);
+  const label = { free: 'Free', pro: trial ? 'Pro trial' : 'Pro', max: 'Max' }[cur];
+  const paidNow = !!(planInfo && planInfo.paid && planInfo.paidUntil);
+  st.innerHTML = `Current plan: <b>${label}</b>` + (paidNow ? (isLifetime(planInfo.paidUntil) ? ' &middot; Lifetime' : ` &middot; until ${planDate(planInfo.paidUntil)}`) : trial ? ` &middot; ${plural(planInfo.trialDaysLeft, 'day')} left` : '');
+}
+function refShow(kind, title, text) {
+  const m = $('refMsg');
+  m.className = 'ref-msg ' + kind; m.hidden = false;
+  m.innerHTML = `<i data-i="${kind === 'ok' ? 'check' : 'x'}"></i><div><b></b><span></span></div>`;
+  m.querySelector('b').textContent = title; m.querySelector('span').textContent = text;
+  hydrate(m);
+}
+async function redeemReferral() {
+  if (redeemBusy) return;
+  const code = $('refInput').value.trim();
+  if (!code) { refShow('err', 'Enter a code first', 'Type or paste your referral code above.'); return; }
+  if (!window.clipPay || !window.clipPay.redeem) { refShow('err', 'Not available', 'Please restart ClipDows and try again.'); return; }
+  redeemBusy = true; $('refBtn').disabled = true; $('refBtn').innerHTML = '<span class="pay-spin"></span>Checking\u2026'; $('refMsg').hidden = true;
+  try {
+    const res = await window.clipPay.redeem(code);
+    planInfo = await window.clipdows.setPaidPlan({ tier: res.tier, expiresAt: res.paidUntil });
+    applyPlanUI(); renderPricing(); renderReferral();
+    const name = PLAN_DEFS[res.tier].name;
+    const detail = res.lifetime ? 'Lifetime access \u2014 no renewals, ever.' : `${plural(res.days, 'day')} of ${name}, active until ${planDate(res.paidUntil)}.`;
+    refShow('ok', `${name} unlocked`, detail + ' Your paired phone will update too.');
+    $('refInput').value = '';
+    showToast(`${name} unlocked`, res.lifetime ? 'Lifetime access activated.' : `Active until ${planDate(res.paidUntil)}.`);
+  } catch (err) {
+    const c = String((err && err.code) || '');
+    const msg = c.includes('unavailable') || c.includes('internal') ? 'Could not reach the server. Check your connection and try again.' : ((err && err.message) || 'Please try again.');
+    refShow('err', 'Code not applied', msg);
+  } finally {
+    redeemBusy = false; $('refBtn').disabled = false; $('refBtn').textContent = 'Redeem';
+  }
+}
+$('refBtn').addEventListener('click', redeemReferral);
+$('refInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') redeemReferral(); });
+
 // ---------- Razorpay checkout ----------
 // Orders and verification happen on Cloud Functions (see functions/index.js). Nothing secret lives here.
 let checkoutBusy = false;
@@ -1018,7 +1065,7 @@ function syncControls() {
 }
 darkMq.addEventListener('change', () => { if (settings.theme === 'system') applySettings(); });
 
-const PANE_TITLES = { general: 'General', pricing: 'Pricing', shortcuts: 'Shortcuts', sync: 'Sync & Devices', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
+const PANE_TITLES = { general: 'General', pricing: 'Pricing', referral: 'Referral', shortcuts: 'Shortcuts', sync: 'Sync & Devices', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
 function openSettings(pane = 'general') {
   syncControls();
   document.querySelectorAll('.set-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.pane === pane));
@@ -1026,6 +1073,7 @@ function openSettings(pane = 'general') {
   $('setHeading').textContent = PANE_TITLES[pane];
   document.querySelector('.settings-modal').classList.toggle('wide', pane === 'pricing');
   settingsModal.hidden = false;
+  if (pane === 'referral') { renderReferral(); setTimeout(() => $('refInput').focus(), 60); }
 }
 $('openSettingsBtn').addEventListener('click', () => openSettings());
 $('userChip').addEventListener('click', () => openSettings('general'));

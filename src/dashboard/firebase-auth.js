@@ -59,4 +59,6 @@ window.clipPay = {
   createOrder: async (tier) => (await httpsCallable(functions, 'createOrder')({ tier })).data,
   verifyPayment: async (p) => (await httpsCallable(functions, 'verifyPayment')(p)).data,
   getEntitlement: async () => (await httpsCallable(functions, 'getEntitlement')()).data,
+  // Referral / redeem codes are checked on the server; the code itself is never stored in the app.
+  redeem: async (code) => (await httpsCallable(functions, 'redeemReferral')({ code })).data,
 };
