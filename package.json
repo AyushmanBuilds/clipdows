@@ -1,7 +1,7 @@
 {
   "name": "clipdows",
   "productName": "ClipDows",
-  "version": "0.1.1",
+  "version": "1.1.0",
   "description": "Copy Anywhere. Access Everywhere. A cross-device clipboard manager for Windows.",
   "main": "src/main/main.js",
   "scripts": {
