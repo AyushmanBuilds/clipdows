@@ -1,7 +1,7 @@
 {
   "name": "clipdows",
   "productName": "ClipDows",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Copy Anywhere. Access Everywhere. A cross-device clipboard manager for Windows.",
   "main": "src/main/main.js",
   "scripts": {
@@ -28,7 +28,7 @@
   "build": {
     "appId": "com.ayushmanbuilds.clipdows",
     "productName": "ClipDows",
-    "copyright": "Copyright \u00a9 2026 Ayushmanbuilds",
+    "copyright": "Copyright © 2026 Ayushmanbuilds",
     "directories": {
       "output": "release",
       "buildResources": "build"
