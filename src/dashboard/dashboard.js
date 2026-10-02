@@ -32,6 +32,7 @@ const PATHS = {
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.6-.3-1-.6-1.4-.3-.4-.4-.8-.4-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.3 17 3 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7" r="1"/>',
   sliders: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 8l4 4-4 4M19 12H9"/>',
   zap: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
@@ -1056,6 +1057,40 @@ function applySettings() {
   document.body.classList.toggle('compact', !!settings.compact);
   if (window.clipdows.applySettings) window.clipdows.applySettings({ tray: settings.tray, startup: settings.startup, dark, guard: settings.guard, sourceApp: settings.sourceApp, ocr: settings.ocr, ignoredApps: settings.ignoredApps, secretTtl: settings.secretTtl });
 }
+
+function renderWallpaper(dataUrl, fileName = '') {
+  const active = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
+  document.body.classList.toggle('has-wallpaper', active);
+  if (active) document.documentElement.style.setProperty('--wallpaper', `url("${dataUrl}")`);
+  else document.documentElement.style.removeProperty('--wallpaper');
+  $('wallpaperPreview').style.backgroundImage = active ? `url("${dataUrl}")` : '';
+  $('wallpaperName').textContent = active ? fileName : 'Standard background';
+  $('clearWallpaperBtn').disabled = !active;
+}
+
+if (window.clipdows.getWallpaper) {
+  window.clipdows.getWallpaper().then((saved) => renderWallpaper(saved && saved.dataUrl, saved && saved.fileName)).catch(() => {});
+  window.clipdows.onWallpaperChanged((dataUrl, fileName) => renderWallpaper(dataUrl, fileName));
+}
+
+$('chooseWallpaperBtn').addEventListener('click', async () => {
+  try {
+    const result = await window.clipdows.chooseWallpaper();
+    if (result && result.ok) {
+      renderWallpaper(result.dataUrl, result.fileName);
+      showToast('Wallpaper updated', 'Your image is saved on this device.');
+    } else if (result && result.error) showToast('Could not use image', result.error);
+  } catch { showToast('Could not use image', 'Please try choosing the image again.'); }
+});
+
+$('clearWallpaperBtn').addEventListener('click', async () => {
+  try {
+    await window.clipdows.clearWallpaper();
+    renderWallpaper('');
+    showToast('Wallpaper cleared', 'The standard background is back.');
+  } catch { showToast('Could not clear wallpaper', 'Please try again.'); }
+});
+
 function syncControls() {
   document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === settings.theme; });
   accentRow.querySelectorAll('.accent-swatch').forEach((sw) => sw.classList.toggle('active', sw.dataset.a1 === settings.a1 && sw.dataset.a2 === settings.a2));

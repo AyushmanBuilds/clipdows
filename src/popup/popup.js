@@ -5,6 +5,18 @@ const tabsEl = document.getElementById('tabs');
 const closeBtn = document.getElementById('closeBtn');
 const expandBtn = document.getElementById('expandBtn');
 
+function applyWallpaper(dataUrl) {
+  const active = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
+  document.body.classList.toggle('wallpaper-active', active);
+  if (active) document.body.style.setProperty('--wallpaper', `url("${dataUrl}")`);
+  else document.body.style.removeProperty('--wallpaper');
+}
+
+if (window.clipdows.getWallpaper) {
+  window.clipdows.getWallpaper().then((saved) => applyWallpaper(saved && saved.dataUrl)).catch(() => {});
+  window.clipdows.onWallpaperChanged(applyWallpaper);
+}
+
 let currentType = 'all';
 let currentSearch = '';
 let currentItems = [];

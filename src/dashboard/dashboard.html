@@ -81,7 +81,7 @@
           <kbd>Ctrl F</kbd>
         </label>
         <button class="icon-btn" id="selectModeBtn" title="Select multiple (Ctrl+A)"><i data-i="checksq"></i></button>
-        <button class="icon-btn" id="timeMachineBtn" title="Time machine (Max)"><i data-i="undo"></i></button>
+        <button class="icon-btn" id="timeMachineBtn" title="Time machine (Max)"><i data-i="clock"></i></button>
         <button class="primary-btn" id="newSnippetBtn"><i data-i="plus"></i>New Snippet</button>
         <button class="icon-btn" id="openSettingsBtn" title="Settings"><i data-i="gear"></i></button>
       </header>
@@ -262,7 +262,7 @@
 
           <section class="set-pane" data-pane="sync" hidden>
             <div class="set-row"><div><b>Real-time sync</b><span>Everything you copy reaches your paired phones instantly.</span></div><span class="badge ok">On</span></div>
-            <div class="set-row"><div><b>End-to-end encryption</b><span id="e2eSub">Clips are encrypted before upload. Only your passphrase can read them.</span></div><span class="badge" id="e2eBadge">Locked</span><button class="ghost-btn" id="e2eBtn" hidden>Unlock</button></div>
+            <div class="set-row"><div><b>End-to-end encryption (locally stored only, Even we cant read your data)</b><span id="e2eSub">Clips are encrypted before upload. Only your passphrase can read them.</span></div><span class="badge" id="e2eBadge">Locked</span><button class="ghost-btn" id="e2eBtn" hidden>Unlock</button></div>
             <div class="set-row"><div><b>Old unencrypted items</b><span>Delete anything uploaded before encryption was turned on.</span></div><button class="ghost-btn danger" id="purgePlainBtn">Delete</button></div>
             <div class="set-row"><div><b>Connected devices</b><span id="syncPaneSub">1 device connected</span></div><button class="ghost-btn" id="manageDevicesBtn"><i data-i="monitor"></i>Manage devices</button></div>
           </section>
@@ -273,9 +273,9 @@
             <div class="set-row" data-feature="customExpiry"><div><b>Secret expiry time</b><span>How long masked secrets stay before they are deleted.</span></div><select class="select" data-setting="secretTtl"><option value="0">Default (1&ndash;2 min)</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option></select></div>
             <div class="set-row"><div><b>Sensitive-data guard</b><span>Passwords, OTPs, cards and API keys are masked, deleted after 1&ndash;2 minutes and never synced.</span></div><input class="switch" type="checkbox" data-setting="guard" /></div>
             <div class="set-row"><div><b>Remember source app</b><span>Show which app each clip came from. Tip: search <code>app:chrome</code> to filter.</span></div><input class="switch" type="checkbox" data-setting="sourceApp" /></div>
-            <div class="set-row" data-feature="appFilter"><div><b>Ignored apps</b><span>Never record copies from these apps (comma-separated).</span></div><input class="field" style="max-width:210px" type="text" data-setting="ignoredApps" placeholder="KeePass, 1Password" /></div>
+            <div class="set-row" data-feature="appFilter"><div><b>Ignored apps</b><span>Never record copies from these apps (comma-separated).</span></div><input class="field" style="max-width:210px" type="text" data-setting="ignoredApps" placeholder="Whatsapp, Facebook" /></div>
             <div class="set-row"><div><b>Search inside screenshots</b><span>Reads text in images on this PC (offline) so search can find it.</span></div><input class="switch" type="checkbox" data-setting="ocr" /></div>
-            <div class="set-row"><div><b>Paste stack</b><span>Press Ctrl+Alt+C, copy several things, then Ctrl+Alt+V pastes them one by one, in order.</span></div></div>
+            <div class="set-row"><div><b>Paste stack</b><span>Press Ctrl+Alt+C, copy several things, then Ctrl+Alt+V pastes them.</span></div></div>
             <div class="set-row"><div><b>Local storage</b><span>Your clipboard history is stored on this computer and synced only to devices you paired.</span></div></div>
           </section>
 
@@ -286,6 +286,14 @@
               <label class="theme-card"><input type="radio" name="theme" value="light" /><span class="theme-prev prev-light"></span><span class="theme-label">Light</span></label>
               <label class="theme-card"><input type="radio" name="theme" value="dark" /><span class="theme-prev prev-dark"></span><span class="theme-label">Dark</span></label>
               <label class="theme-card"><input type="radio" name="theme" value="system" /><span class="theme-prev prev-system"></span><span class="theme-label">System</span></label>
+            </div>
+            <h4>Background image</h4>
+            <p class="set-hint">Use an image from this computer as your ClipDows wallpaper. Images stay on this device.</p>
+            <div class="wallpaper-row">
+              <div class="wallpaper-preview" id="wallpaperPreview" aria-hidden="true"></div>
+              <div class="wallpaper-info"><b id="wallpaperName">Standard background</b><span>PNG, JPG, WEBP, or BMP · up to 10 MB</span></div>
+              <button class="ghost-btn" id="chooseWallpaperBtn">Choose image</button>
+              <button class="ghost-btn" id="clearWallpaperBtn" disabled>Clear</button>
             </div>
             <h4>Accent color</h4>
             <div class="accent-row" id="accentRow">

@@ -30,6 +30,16 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+body.wallpaper-active::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(rgba(12, 14, 24, 0.16), rgba(12, 14, 24, 0.16)), var(--wallpaper);
+  background-position: center;
+  background-size: cover;
+}
+
 .popup {
   width: 380px;
   height: 460px;
@@ -44,6 +54,8 @@ html, body {
   overflow: hidden;
   animation: popIn 0.16s var(--ease);
 }
+
+.wallpaper-active .popup { background: rgba(255, 255, 255, 0.72); }
 
 @keyframes popIn {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }

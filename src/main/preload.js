@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('clipdows', {
   setSession: (uid) => ipcRenderer.invoke('session:set', uid),
   bulkItems: (action, ids) => ipcRenderer.invoke('items:bulk', { action, ids }),
   applySettings: (s) => ipcRenderer.send('settings:apply', s),
+  getWallpaper: () => ipcRenderer.invoke('theme:getWallpaper'),
+  chooseWallpaper: () => ipcRenderer.invoke('theme:chooseWallpaper'),
+  clearWallpaper: () => ipcRenderer.invoke('theme:clearWallpaper'),
+  onWallpaperChanged: (cb) => ipcRenderer.on('theme:wallpaperChanged', (_evt, dataUrl, fileName) => cb(dataUrl, fileName)),
 
   // User-configurable global show/hide shortcut (defaults to Alt)
   getGlobalShortcut: () => ipcRenderer.invoke('shortcut:get'),

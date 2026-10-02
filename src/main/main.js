@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage, Notification, safeStorage, clipboard } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, screen, nativeImage, Notification, safeStorage, clipboard, dialog } = require('electron');
 process.on('uncaughtException', (err) => console.error('[main] uncaught:', err));
 process.on('unhandledRejection', (err) => console.error('[main] unhandled rejection:', err));
 
@@ -30,12 +30,47 @@ const updater = require('./updater');
 let popupWindow = null;
 let dashboardWindow = null;
 let tray = null;
+let currentThemeDark = false;
+let hasCustomWallpaper = false;
 const POPUP_WIDTH = 380;
 const POPUP_HEIGHT = 460;
 
 // Single source of truth for the ClipDows brand icon (tray, taskbar/dock, and
 // window icon). Same file the dashboard uses as its logo — see dashboard.html.
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'tray-icon.png');
+const WALLPAPER_DIR = path.join(app.getPath('userData'), 'appearance');
+const WALLPAPER_META_PATH = path.join(WALLPAPER_DIR, 'wallpaper.json');
+const WALLPAPER_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', bmp: 'image/bmp' };
+const WALLPAPER_MAX_BYTES = 10 * 1024 * 1024;
+
+function getWallpaper() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(WALLPAPER_META_PATH, 'utf8'));
+    if (!meta || typeof meta.file !== 'string' || !/^wallpaper\.(png|jpe?g|webp|bmp)$/i.test(meta.file)) return null;
+    const file = path.join(WALLPAPER_DIR, meta.file);
+    const bytes = fs.readFileSync(file);
+    if (bytes.length > WALLPAPER_MAX_BYTES) return null;
+    const ext = path.extname(file).slice(1).toLowerCase();
+    return { dataUrl: `data:${WALLPAPER_TYPES[ext]};base64,${bytes.toString('base64')}`, fileName: typeof meta.originalName === 'string' ? meta.originalName : 'Custom wallpaper' };
+  } catch { return null; }
+}
+hasCustomWallpaper = !!getWallpaper();
+
+function updateDashboardTitleBar() {
+  if (!dashboardWindow) return;
+  dashboardWindow.setTitleBarOverlay({
+    color: hasCustomWallpaper ? 'rgba(0, 0, 0, 0)' : currentThemeDark ? '#0C0E14' : '#F2F5FB',
+    symbolColor: currentThemeDark ? '#CBD5E1' : '#475569',
+    height: 40,
+  });
+}
+
+function broadcastWallpaper(wallpaper) {
+  [dashboardWindow, popupWindow].forEach((win) => {
+    if (win && !win.isDestroyed()) win.webContents.send('theme:wallpaperChanged', wallpaper ? wallpaper.dataUrl : '', wallpaper ? wallpaper.fileName : '');
+  });
+}
+
 function loadAppIcon() {
   if (fs.existsSync(APP_ICON_PATH)) return nativeImage.createFromPath(APP_ICON_PATH);
   console.warn(`[main] App icon not found at ${APP_ICON_PATH} — falling back to Electron's default icon.`);
@@ -91,7 +126,7 @@ function createDashboardWindow(opts) {
     // Frameless look: the dashboard draws its own top bar; Windows draws the
     // minimize / maximize / close buttons on top of it.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#F2F5FB', symbolColor: '#475569', height: 40 },
+    titleBarOverlay: { color: hasCustomWallpaper ? 'rgba(0, 0, 0, 0)' : '#F2F5FB', symbolColor: '#475569', height: 40 },
     icon: loadAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -494,17 +529,72 @@ ipcMain.handle('snippets:create', (_evt, { title, content, folder, trigger }) =>
 });
 
 // Settings that need the main process: tray, launch at login, title-bar colours.
+ipcMain.handle('theme:getWallpaper', () => getWallpaper());
+
+ipcMain.handle('theme:chooseWallpaper', async () => {
+  const options = {
+    title: 'Choose a wallpaper',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: Object.keys(WALLPAPER_TYPES) }],
+  };
+  const result = dashboardWindow
+    ? await dialog.showOpenDialog(dashboardWindow, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+
+  const source = result.filePaths[0];
+  const ext = path.extname(source).slice(1).toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(WALLPAPER_TYPES, ext)) return { ok: false, error: 'Choose a PNG, JPG, WEBP, or BMP image.' };
+  try {
+    const stat = fs.statSync(source);
+    if (!stat.isFile() || stat.size === 0) return { ok: false, error: 'That image is empty or unavailable.' };
+    if (stat.size > WALLPAPER_MAX_BYTES) return { ok: false, error: 'Choose an image smaller than 10 MB.' };
+    if (nativeImage.createFromPath(source).isEmpty()) return { ok: false, error: 'ClipDows could not open that image.' };
+    fs.mkdirSync(WALLPAPER_DIR, { recursive: true });
+    const file = `wallpaper.${ext}`;
+    fs.copyFileSync(source, path.join(WALLPAPER_DIR, file));
+    for (const oldExt of Object.keys(WALLPAPER_TYPES)) {
+      if (oldExt !== ext) {
+        try { fs.unlinkSync(path.join(WALLPAPER_DIR, `wallpaper.${oldExt}`)); } catch { /* old version may not exist */ }
+      }
+    }
+    fs.writeFileSync(WALLPAPER_META_PATH, JSON.stringify({ file, originalName: path.basename(source) }));
+    const wallpaper = getWallpaper();
+    if (!wallpaper) return { ok: false, error: 'ClipDows could not read that image.' };
+    hasCustomWallpaper = true;
+    updateDashboardTitleBar();
+    broadcastWallpaper(wallpaper);
+    return { ok: true, ...wallpaper };
+  } catch (err) {
+    console.warn('[main] Could not save wallpaper:', err);
+    return { ok: false, error: 'Could not save that image. Check that you can access the file.' };
+  }
+});
+
+ipcMain.handle('theme:clearWallpaper', () => {
+  try {
+    const meta = JSON.parse(fs.readFileSync(WALLPAPER_META_PATH, 'utf8'));
+    if (meta && typeof meta.file === 'string' && /^wallpaper\.(png|jpe?g|webp|bmp)$/i.test(meta.file)) {
+      try { fs.unlinkSync(path.join(WALLPAPER_DIR, meta.file)); } catch { /* already removed */ }
+    }
+  } catch { /* no saved wallpaper */ }
+  try { fs.unlinkSync(WALLPAPER_META_PATH); } catch { /* already removed */ }
+  hasCustomWallpaper = false;
+  updateDashboardTitleBar();
+  broadcastWallpaper(null);
+  return { ok: true };
+});
+
 ipcMain.on('settings:apply', (_evt, s) => {
   const L = plan.limits();
+  currentThemeDark = !!s.dark;
   prefs.set({ ...s, ignoredApps: L.appFilter ? s.ignoredApps : '', secretTtl: L.customExpiry ? s.secretTtl : 0 }); // Pro features
   try {
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!s.startup, args: ['--hidden'] });
     if (s.tray === false && tray) { tray.destroy(); tray = null; }
     else if (s.tray !== false && !tray) createTray();
     if (dashboardWindow) {
-      dashboardWindow.setTitleBarOverlay(s.dark
-        ? { color: '#0C0E14', symbolColor: '#CBD5E1', height: 40 }
-        : { color: '#F2F5FB', symbolColor: '#475569', height: 40 });
+      updateDashboardTitleBar();
       dashboardWindow.setBackgroundColor(s.dark ? '#0C0E14' : '#F2F5FB');
     }
   } catch (err) {
