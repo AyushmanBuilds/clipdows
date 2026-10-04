@@ -48,7 +48,8 @@ function setBtn(btn, icon, label) { btn.innerHTML = `<i data-i="${icon}"></i><sp
 // ---------- Auth (Firebase) ----------
 const onboarding = $('onboarding');
 const appRoot = $('appRoot');
-const continueGoogle = $('continueGoogle');
+const verifyGate = $('verifyGate');
+let verifyTimer = null;
 const authForm = $('authForm');
 const authName = $('authName');
 const authEmail = $('authEmail');
@@ -128,34 +129,38 @@ authForgot.addEventListener('click', async () => {
   } catch (err) { showAuthError(friendlyAuthError(err)); }
 });
 
-let googleBusy = false;
-const googleLabel = continueGoogle.innerHTML;
-continueGoogle.addEventListener('click', async () => {
-  if (googleBusy) { window.clipdows.googleCancel(); return; } // second click = cancel
-  if (!window.clipAuth) { showAuthError('Auth is still loading. Check your internet connection and try again.'); return; }
-  googleBusy = true;
-  showAuthError('');
-  continueGoogle.innerHTML = '<span class="oauth-dot">G</span> Waiting for browser… (click to cancel)';
+// ---------- Verify-email screen ----------
+// Accounts whose email is not verified stay here: no local database, no sync, no trial, no payments.
+function startVerifyGate(user) {
+  $('verifyText').textContent = `We sent a verification link to ${user.email}. Open it (check spam too), then come back here.`;
+  stopVerifyPoll();
+  verifyTimer = setInterval(() => checkVerified(false), 5000); // continues by itself once the link was opened
+}
+function stopVerifyPoll() { if (verifyTimer) clearInterval(verifyTimer); verifyTimer = null; }
+async function checkVerified(manual) {
   try {
-    const r = await window.clipdows.googleSignIn();
-    console.log('[google-signin] browser step:', { ok: r.ok, cancelled: r.cancelled, error: r.error });
-    if (r.ok) {
-      continueGoogle.innerHTML = '<span class="oauth-dot">G</span> Signing you in…';
-      const cred = await window.clipAuth.signInWithGoogle(r.idToken, r.accessToken);
-      console.log('[google-signin] Firebase signed in:', cred.user.email);
-      applyUser({ uid: cred.user.uid, email: cred.user.email, displayName: cred.user.displayName || '' });
-    } else if (!r.cancelled) showAuthError(r.error || 'Google sign-in failed. Please try again.');
-  } catch (err) {
-    console.error('[google-signin] Firebase rejected the Google token:', err);
-    const code = (err && err.code) || 'unknown';
-    const hint = /invalid-credential|idp|audience/i.test(code + ' ' + (err && err.message))
-      ? ' In Firebase → Authentication → Sign-in method → Google, add your Desktop client ID under "Safelist client IDs from external projects".'
-      : '';
-    showAuthError(`Google sign-in failed (${code}).${hint}`);
-  } finally {
-    googleBusy = false;
-    continueGoogle.innerHTML = googleLabel;
-  }
+    const ok = await window.clipAuth.refreshVerified();   // emits clipauth:state when verified -> applyUser continues
+    if (!ok && manual) showToast('Not verified yet', 'Open the link in the email we sent, then try again.');
+  } catch (err) { if (manual) showToast('Could not check', friendlyAuthError(err)); }
+}
+$('verifyCheck').addEventListener('click', () => checkVerified(true));
+$('verifyResend').addEventListener('click', async () => {
+  const btn = $('verifyResend');
+  btn.disabled = true;
+  try {
+    await window.clipAuth.resendVerification();
+    showToast('Verification email sent', 'Check your inbox and spam folder.');
+  } catch (err) { showToast('Could not send', friendlyAuthError(err)); }
+  let left = 60;
+  btn.textContent = `Resend in ${left}s`;
+  const t = setInterval(() => {
+    left--;
+    if (left <= 0) { clearInterval(t); btn.disabled = false; btn.textContent = 'Resend email'; }
+    else btn.textContent = `Resend in ${left}s`;
+  }, 1000);
+});
+$('verifySignOut').addEventListener('click', async () => {
+  try { await window.clipAuth.signOut(); } catch (err) { console.error(err); }
 });
 
 signOutBtn.addEventListener('click', async () => {
@@ -177,7 +182,9 @@ $('bgNoticeOk').addEventListener('click', closeBgNotice);
 $('bgNoticeSettings').addEventListener('click', () => { closeBgNotice(); openSettings(); });
 
 async function applyUser(user) {
-  if (user) {
+  const gated = !!user && !user.emailVerified; // unverified accounts wait on the verify screen
+  if (user && !gated) {
+    verifyGate.hidden = true; stopVerifyPoll();
     const name = user.displayName || (user.email || '').split('@')[0];
     const initials = initialsFor(user.displayName, user.email);
     $('userName').textContent = $('sUserName').textContent = name;
@@ -194,7 +201,9 @@ async function applyUser(user) {
     maybeShowBgNotice();
   } else {
     appRoot.hidden = true;
-    onboarding.hidden = false;
+    onboarding.hidden = gated;
+    verifyGate.hidden = !gated;
+    if (gated) startVerifyGate(user); else stopVerifyPoll();
     showAuthError('');
     if (window.clipSync) window.clipSync.stopClipSync();
     await window.clipdows.setSession(null); // locks the local database
@@ -536,6 +545,12 @@ async function syncEntitlement() {
     const tier = e && e.tier ? e.tier : null;
     if (tier || (planInfo && planInfo.paid)) {
       planInfo = await window.clipdows.setPaidPlan({ tier, expiresAt: (e && e.paidUntil) || 0 });
+      applyPlanUI();
+    }
+    // The 14-day trial is granted by the server, and only once the email is verified.
+    const ends = (e && e.trialEndsAt) || 0;
+    if (ends !== ((planInfo && planInfo.trialEndsAt) || 0)) {
+      planInfo = await window.clipdows.setTrial(ends);
       applyPlanUI();
     }
   } catch (err) { /* offline, or functions not deployed yet: keep the local plan */ }
@@ -1115,6 +1130,86 @@ $('userChip').addEventListener('click', () => openSettings('general'));
 $('settingsClose').addEventListener('click', () => { settingsModal.hidden = true; });
 settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.hidden = true; });
 $('setNav').addEventListener('click', (e) => { const b = e.target.closest('.set-nav-item'); if (b) openSettings(b.dataset.pane); });
+
+// Microsoft Store updates are downloaded while ClipDows stays open; installation
+// and restart happen only after the user confirms the ready-to-install state.
+const storeUpdateRow = $('storeUpdateRow');
+const storeUpdateButton = $('storeUpdateButton');
+const storeUpdateMessage = $('storeUpdateMessage');
+const storeUpdateProgress = $('storeUpdateProgress');
+const storeUpdateFill = $('storeUpdateFill');
+const storeUpdateProgressText = $('storeUpdateProgressText');
+let storeUpdatePhase = 'idle';
+
+function renderStoreUpdateState(result = {}) {
+  storeUpdatePhase = result.state || 'idle';
+  storeUpdateProgress.hidden = !['downloading', 'ready', 'installing'].includes(storeUpdatePhase);
+  storeUpdateFill.classList.toggle('indeterminate', storeUpdatePhase === 'installing');
+  if (storeUpdatePhase === 'downloading') {
+    const percent = Math.max(0, Math.min(100, Number(result.percent) || 0));
+    storeUpdateFill.style.width = `${percent}%`;
+    storeUpdateProgressText.textContent = `Downloading updateâ€¦ ${percent}%`;
+    storeUpdateButton.textContent = 'Downloadingâ€¦';
+    storeUpdateButton.disabled = true;
+    storeUpdateMessage.textContent = 'ClipDows stays open while the Store downloads the update.';
+  } else if (storeUpdatePhase === 'checking') {
+    storeUpdateButton.textContent = 'Checkingâ€¦';
+    storeUpdateButton.disabled = true;
+    storeUpdateMessage.textContent = 'Checking the Microsoft Storeâ€¦';
+  } else if (storeUpdatePhase === 'ready') {
+    storeUpdateFill.style.width = '100%';
+    storeUpdateProgressText.textContent = 'Download complete';
+    storeUpdateButton.textContent = 'Restart to install';
+    storeUpdateButton.disabled = false;
+    storeUpdateMessage.textContent = 'The update is ready. Save your work, then restart to install it.';
+  } else if (storeUpdatePhase === 'installing') {
+    storeUpdateFill.style.width = '';
+    storeUpdateProgressText.textContent = 'Installingâ€¦ ClipDows may close and restart.';
+    storeUpdateButton.textContent = 'Installingâ€¦';
+    storeUpdateButton.disabled = true;
+    storeUpdateMessage.textContent = 'The Microsoft Store is applying the update.';
+  } else if (storeUpdatePhase === 'installed') {
+    storeUpdateMessage.textContent = 'Update installed. Restarting ClipDowsâ€¦';
+    storeUpdateButton.disabled = true;
+  } else if (storeUpdatePhase === 'current') {
+    storeUpdateProgress.hidden = true;
+    storeUpdateMessage.textContent = 'You have the latest Microsoft Store version.';
+    storeUpdateButton.textContent = 'Check again';
+    storeUpdateButton.disabled = false;
+  } else if (storeUpdatePhase === 'error') {
+    storeUpdateProgress.hidden = true;
+    storeUpdateMessage.textContent = result.message || 'Could not check for updates. Try again later.';
+    storeUpdateButton.textContent = 'Try again';
+    storeUpdateButton.disabled = false;
+  } else {
+    storeUpdateProgress.hidden = true;
+    storeUpdateMessage.textContent = 'Check for and install the latest Store version of ClipDows.';
+    storeUpdateButton.textContent = 'Check for updates';
+    storeUpdateButton.disabled = false;
+  }
+}
+
+if (window.clipdows.onStoreUpdateState) window.clipdows.onStoreUpdateState(renderStoreUpdateState);
+if (window.clipdows.isStorePackage) {
+  window.clipdows.isStorePackage().then((isStore) => { storeUpdateRow.hidden = !isStore; }).catch(() => { storeUpdateRow.hidden = true; });
+} else storeUpdateRow.hidden = true;
+
+storeUpdateButton.addEventListener('click', async () => {
+  storeUpdateButton.disabled = true;
+  try {
+    if (storeUpdatePhase === 'ready') {
+      renderStoreUpdateState({ state: 'installing' });
+      const result = await window.clipdows.installStoreUpdate();
+      if (!result.ok) renderStoreUpdateState(result);
+    } else {
+      renderStoreUpdateState({ state: 'checking' });
+      const result = await window.clipdows.checkStoreUpdates();
+      if (['current', 'error', 'busy'].includes(result.state)) renderStoreUpdateState({ ...result, state: result.state === 'busy' ? 'error' : result.state });
+    }
+  } catch (err) {
+    renderStoreUpdateState({ state: 'error', message: (err && err.message) || 'Could not contact the Microsoft Store.' });
+  }
+});
 
 // ---------- global shortcut recorder ----------
 const shortcutDisplay = $('shortcutDisplay');

@@ -14,7 +14,14 @@ contextBridge.exposeInMainWorld('clipdows', {
   getPlan: () => ipcRenderer.invoke('plan:get'),
   setDevPlan: (tier) => ipcRenderer.invoke('plan:setDev', tier),
   setPaidPlan: (p) => ipcRenderer.invoke('plan:setPaid', p),
+  setTrial: (endsAt) => ipcRenderer.invoke('plan:setTrial', endsAt),
   onPlanChanged: (cb) => ipcRenderer.on('plan:changed', (_evt, info) => cb(info)),
+
+  // Microsoft Store MSIX updates. The Store bridge reports progress and owns package installation.
+  isStorePackage: () => ipcRenderer.invoke('storeUpdate:isAvailable'),
+  checkStoreUpdates: () => ipcRenderer.invoke('storeUpdate:check'),
+  installStoreUpdate: () => ipcRenderer.invoke('storeUpdate:install'),
+  onStoreUpdateState: (cb) => ipcRenderer.on('storeUpdate:state', (_evt, state) => cb(state)),
 
   // Per-account local database, multi-select actions, and settings bridge
   setSession: (uid) => ipcRenderer.invoke('session:set', uid),
@@ -29,8 +36,6 @@ contextBridge.exposeInMainWorld('clipdows', {
   getGlobalShortcut: () => ipcRenderer.invoke('shortcut:get'),
   setGlobalShortcut: (accelerator) => ipcRenderer.invoke('shortcut:set', accelerator),
 
-  googleSignIn: () => ipcRenderer.invoke('auth:google'),
-  googleCancel: () => ipcRenderer.send('auth:googleCancel'),
   hidePopup: () => ipcRenderer.send('popup:hide'),
   openDashboard: () => ipcRenderer.send('dashboard:open'),
   onItemsUpdated: (cb) => ipcRenderer.on('items:updated', () => cb()),

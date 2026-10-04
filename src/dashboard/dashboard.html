@@ -22,10 +22,6 @@
         <li><i data-i="shield"></i>Fast, secure and private</li>
         <li><i data-i="zap"></i>Built for people who do more</li>
       </ul>
-      <button class="oauth-btn" id="continueGoogle">
-        <span class="oauth-dot">G</span> Continue with Google
-      </button>
-      <div class="onboarding-or"><span>or use email</span></div>
       <form class="auth-form" id="authForm" novalidate>
         <input class="field" id="authName" type="text" placeholder="Your name" autocomplete="name" hidden />
         <input class="field" id="authEmail" type="email" placeholder="Email" autocomplete="email" />
@@ -37,6 +33,21 @@
           <button class="link-btn" id="authForgot" type="button">Forgot password?</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ================= Verify email ================= -->
+  <div class="onboarding" id="verifyGate" hidden>
+    <div class="onboarding-card">
+      <img class="onboarding-logo" src="../../assets/tray-icon.png" alt="" width="64" height="64" />
+      <div class="onboarding-name">ClipDows</div>
+      <h1>Verify your email</h1>
+      <div class="onboarding-tag" id="verifyText">We sent you a verification link. Open it, then come back here.</div>
+      <button class="primary-btn wide" id="verifyCheck" type="button">I've verified my email</button>
+      <div class="auth-links">
+        <button class="link-btn" id="verifyResend" type="button">Resend email</button>
+        <button class="link-btn" id="verifySignOut" type="button">Use a different account</button>
+      </div>
     </div>
   </div>
 
@@ -310,6 +321,14 @@
 
           <section class="set-pane" data-pane="advanced" hidden>
             <div class="set-row" data-feature="export"><div><b>Export your data</b><span>Save all active items as a JSON file.</span></div><button class="ghost-btn" id="exportBtn"><i data-i="download"></i>Export</button></div>
+            <div class="set-row store-update-row" id="storeUpdateRow" hidden>
+              <div><b>Microsoft Store updates</b><span id="storeUpdateMessage">Check for and install the latest Store version of ClipDows.</span></div>
+              <button class="ghost-btn" id="storeUpdateButton" type="button">Check for updates</button>
+              <div class="store-update-progress" id="storeUpdateProgress" hidden>
+                <div class="store-update-track"><div class="store-update-fill" id="storeUpdateFill"></div></div>
+                <span class="set-hint" id="storeUpdateProgressText">Preparing updateâ€¦</span>
+              </div>
+            </div>
             <div class="set-row"><div><b>About</b><span>ClipDows for Windows</span></div></div>
           </section>
 

@@ -4,8 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
-const TRIAL_DAYS = 14;
-const DAY = 86400000;
+const DAY = 86400000;   // the 14-day trial itself is granted by the server (functions/index.js) after email verification
 
 const LIMITS = {
   free: { history: 100, pinned: 5, snippets: 10, phones: 1, syncItems: 25, syncImages: false, stack: 5, ocrPerMonth: 5,
@@ -17,7 +16,7 @@ const LIMITS = {
 };
 
 let uid = null;
-let state = {};   // { trialStart, paidTier, paidUntil, devTier, usage: { month, ocr } }
+let state = {};   // { trialEndsAt, paidTier, paidUntil, devTier, usage: { month, ocr } }
 
 const file = () => path.join(app.getPath('userData'), `plan-${uid}.json`);
 function save() { if (!uid) return; try { fs.writeFileSync(file(), JSON.stringify(state)); } catch { /* ignore */ } }
@@ -27,12 +26,12 @@ function load(newUid) {
   state = {};
   if (!uid) return;
   try { state = JSON.parse(fs.readFileSync(file(), 'utf8')) || {}; } catch { state = {}; }
-  if (!state.trialStart) { state.trialStart = Date.now(); save(); } // TODO payments step: trial start lives server-side
+  // No local trial any more: trialEndsAt is mirrored from the server by setTrial() once the email is verified.
 }
 
 function trialDaysLeft() {
-  if (!state.trialStart) return 0;
-  return Math.max(0, Math.ceil((state.trialStart + TRIAL_DAYS * DAY - Date.now()) / DAY));
+  if (!state.trialEndsAt) return 0;
+  return Math.max(0, Math.ceil((state.trialEndsAt - Date.now()) / DAY));
 }
 
 function tier() {
@@ -53,7 +52,7 @@ function info() {
     paid, paidUntil: paid ? state.paidUntil : 0,
     trial: t === 'pro' && !paid && !(!app.isPackaged && state.devTier),
     trialDaysLeft: trialDaysLeft(),
-    trialEndsAt: state.trialStart ? state.trialStart + TRIAL_DAYS * DAY : 0, // the phone app mirrors the plan from these
+    trialEndsAt: state.trialEndsAt || 0, // the phone app mirrors the plan from these
     paidTier: paid ? state.paidTier : null,
     limits: LIMITS[t],
     dev: !app.isPackaged,
@@ -61,6 +60,8 @@ function info() {
   };
 }
 
+/** Mirrors the server-granted trial (0 = none). */
+function setTrial(endsAt) { state.trialEndsAt = Number(endsAt) > 0 ? Number(endsAt) : 0; delete state.trialStart; save(); }
 function setDev(t) { state.devTier = LIMITS[t] ? t : ''; save(); }
 function setPaid({ tier: t, expiresAt } = {}) {
   if (LIMITS[t]) { state.paidTier = t; state.paidUntil = Number(expiresAt) || 0; } else { state.paidTier = null; state.paidUntil = 0; }
@@ -78,4 +79,4 @@ function consumeOcr() {
   return true;
 }
 
-module.exports = { load, tier, limits, info, setDev, setPaid, consumeOcr, LIMITS };
+module.exports = { load, tier, limits, info, setDev, setPaid, setTrial, consumeOcr, LIMITS };

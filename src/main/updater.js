@@ -1,7 +1,8 @@
 // Auto-update via GitHub Releases (electron-updater).
 // Checks shortly after launch and every few hours, downloads in the background,
 // and installs when the user quits (or immediately if they click the notification /
-// tray item). Does nothing in development (unpackaged) runs.
+// tray item). Does nothing in development (unpackaged) runs, and nothing in the Microsoft Store
+// (MSIX) build: the Store updates those installs itself and does not allow self-updating.
 const { app, Notification, dialog } = require('electron');
 
 let autoUpdater = null;
@@ -9,6 +10,9 @@ let opts = { beforeInstall: () => {}, icon: undefined };
 let manualCheck = false;
 let downloadedVersion = null;
 let timer = null;
+
+// Electron sets process.windowsStore when the app runs from an MSIX / Microsoft Store install.
+const IS_STORE = !!process.windowsStore;
 
 const FIRST_CHECK_MS = 15 * 1000;
 const INTERVAL_MS = 4 * 60 * 60 * 1000;
@@ -30,7 +34,7 @@ function installNow() {
 
 function init(options = {}) {
   opts = { ...opts, ...options };
-  if (!app.isPackaged) return; // no updates in dev
+  if (!app.isPackaged || IS_STORE) return; // no updates in dev; the Store updates its own installs
   try {
     ({ autoUpdater } = require('electron-updater'));
   } catch (err) {
@@ -75,6 +79,10 @@ function checkQuietly() {
 
 /** Tray menu → "Check for Updates". */
 function checkNow() {
+  if (IS_STORE) {
+    toast('ClipDows', 'Updates come through the Microsoft Store. Open the Store app → Library to check.');
+    return;
+  }
   if (!app.isPackaged || !autoUpdater) {
     toast('ClipDows', 'Updates are only available in the installed version.');
     return;

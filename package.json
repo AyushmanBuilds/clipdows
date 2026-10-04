@@ -8,6 +8,9 @@
     "start": "electron .",
     "rebuild": "electron-rebuild",
     "dist": "electron-builder --win --x64 --publish never",
+    "build:store-helper": "node scripts/build-store-update-helper.js",
+    "dist:msix": "npm run build:store-helper && electron-builder --win dir --x64 --publish never && node scripts/package-msix.js",
+    "dist:msix:store": "node scripts/package-msix.js --check-store && npm run build:store-helper && electron-builder --win dir --x64 --publish never && node scripts/package-msix.js --store",
     "release": "electron-builder --win --x64 --publish always"
   },
   "author": "Ayushmanbuilds",
@@ -36,11 +39,13 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "build/store-update/**/*",
       "package.json",
       "!**/*.map"
     ],
     "asarUnpack": [
       "assets/tessdata/**",
+      "build/store-update/**",
       "node_modules/@nut-tree-fork/**",
       "node_modules/active-win/**",
       "node_modules/uiohook-napi/**"

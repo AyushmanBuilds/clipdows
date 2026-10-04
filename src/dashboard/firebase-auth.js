@@ -7,8 +7,7 @@ import {
   updateProfile,
   sendPasswordResetEmail,
   signOut,
-  GoogleAuthProvider,
-  signInWithCredential,
+  sendEmailVerification,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 
@@ -31,7 +30,7 @@ export { app, auth };
 
 function emit(user) {
   const detail = user
-    ? { uid: user.uid, email: user.email, displayName: user.displayName || '' }
+    ? { uid: user.uid, email: user.email, displayName: user.displayName || '', emailVerified: !!user.emailVerified }
     : null;
   window.dispatchEvent(new CustomEvent('clipauth:state', { detail }));
 }
@@ -42,14 +41,25 @@ window.clipAuth = {
   signIn: (email, password) => signInWithEmailAndPassword(auth, email, password),
   async signUp(name, email, password) {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
+    sendEmailVerification(cred.user).catch(() => {}); // if this fails the user can press "Resend" on the verify screen
     if (name) {
       await updateProfile(cred.user, { displayName: name });
       emit(auth.currentUser); // re-emit so the UI picks up the name
     }
     return cred;
   },
-  signInWithGoogle: (idToken, accessToken) =>
-    signInWithCredential(auth, GoogleAuthProvider.credential(idToken, accessToken)),
+  resendVerification: () => sendEmailVerification(auth.currentUser),
+  // Re-reads the account from Firebase. Once the email is verified, force a fresh ID token (it carries
+  // email_verified=true, which the Cloud Functions check) and tell the UI. Returns true when verified.
+  async refreshVerified() {
+    const u = auth.currentUser;
+    if (!u) return false;
+    await u.reload();
+    if (!u.emailVerified) return false;
+    await u.getIdToken(true);
+    emit(auth.currentUser);
+    return true;
+  },
   resetPassword: (email) => sendPasswordResetEmail(auth, email),
   signOut: () => signOut(auth),
 };

@@ -501,3 +501,10 @@ body.has-wallpaper .sync-card{background:linear-gradient(135deg,var(--soft),tran
 .ref-step .n{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--soft);color:var(--accent);font-weight:700;font-size:12px;margin-bottom:8px}
 @keyframes refpop{from{opacity:0;transform:translateY(6px) scale(.98)}}
 @media (max-width:920px){.ref-steps{grid-template-columns:1fr}.ref-hero{flex-wrap:wrap}.ref-hero .pricing-status{margin-left:0}}
+.store-update-row { flex-wrap: wrap; }
+.store-update-progress { flex: 0 0 100%; padding: 0 0 14px; }
+.store-update-track { height: 6px; overflow: hidden; border-radius: 99px; background: var(--line, rgba(148,163,184,.18)); }
+.store-update-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .25s ease; }
+.store-update-fill.indeterminate { width: 42%; animation: storeUpdateSweep 1.1s ease-in-out infinite alternate; }
+.store-update-progress .set-hint { display: block; margin-top: 8px; }
+@keyframes storeUpdateSweep { from { transform: translateX(-8%); } to { transform: translateX(150%); } }

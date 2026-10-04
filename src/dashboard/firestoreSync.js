@@ -168,24 +168,36 @@ async function pruneCloud(uid, cap) {
 }
 
 // ---------- plan -> phone ----------
-// Publishes this account's plan to users/{uid}/meta/plan so the phone app can unlock the same features.
-// The phone only reads it (Firestore rules: owner-only write). Trial/subscription expiry is evaluated on the phone.
+// The desktop account owns this document; the paired phone only reads it. Keep this
+// write in sync with the PWA's getPlan() fields so plan changes reach linked phones.
 let planToPublish = null;
 let lastPlanSig = '';
 async function flushPlan() {
   if (!currentUid || !planToPublish) return;
   const i = planToPublish;
   const body = {
-    tier: i.tier, paidTier: i.paidTier || null, paidUntil: i.paidTier ? (i.paidUntil || 0) : 0,
-    trialEndsAt: i.trialEndsAt || 0, dev: !!(i.dev && i.devTier), devTier: (i.dev && i.devTier) || '',
+    tier: i.tier,
+    paidTier: i.paidTier || null,
+    paidUntil: i.paidTier ? (i.paidUntil || 0) : 0,
+    trialEndsAt: i.trialEndsAt || 0,
+    dev: !!(i.dev && i.devTier),
+    devTier: (i.dev && i.devTier) || '',
   };
   const sig = currentUid + '|' + JSON.stringify(body);
   if (sig === lastPlanSig) return;
   lastPlanSig = sig;
-  try { await setDoc(doc(db, 'users', currentUid, 'meta', 'plan'), { ...body, updatedAt: Date.now() }); }
-  catch (err) { lastPlanSig = ''; console.warn('[firestoreSync] could not publish plan:', err.message); }
+  try {
+    await setDoc(doc(db, 'users', currentUid, 'meta', 'plan'), { ...body, updatedAt: Date.now() });
+  } catch (err) {
+    lastPlanSig = '';
+    console.warn('[firestoreSync] could not publish plan:', err.message);
+  }
 }
-function publishPlan(info) { if (!info) return; planToPublish = info; flushPlan(); }
+function publishPlan(info) {
+  if (!info) return;
+  planToPublish = info;
+  flushPlan();
+}
 
 function registerPushHandler() {
   if (pushHandlerRegistered) return;

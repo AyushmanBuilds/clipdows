@@ -17,7 +17,6 @@ const crypto = require('crypto');
 const db = require('./db');
 const watcher = require('./clipboardWatcher');
 const autoPaste = require('./autoPaste');
-const googleAuth = require('./googleAuth');
 const prefs = require('./prefs');
 const sensitive = require('./sensitive');
 const sourceApp = require('./sourceApp');
@@ -26,6 +25,7 @@ const plan = require('./plan');
 const snippets = require('./snippets');
 const triggers = require('./triggers');
 const updater = require('./updater');
+const storeUpdater = require('./storeUpdater');
 
 let popupWindow = null;
 let dashboardWindow = null;
@@ -306,6 +306,17 @@ app.on('will-quit', () => {
   triggers.stop();
   globalShortcut.unregisterAll();
   watcher.stop();
+});
+
+ipcMain.handle('storeUpdate:isAvailable', () => storeUpdater.isStorePackage());
+ipcMain.handle('storeUpdate:check', () => storeUpdater.checkAndDownload(dashboardWindow));
+ipcMain.handle('storeUpdate:install', async () => {
+  const result = await storeUpdater.install(dashboardWindow);
+  if (result.ok) {
+    app.relaunch();
+    app.quit();
+  }
+  return result;
 });
 
 // ---------- helpers ----------
@@ -602,19 +613,6 @@ ipcMain.on('settings:apply', (_evt, s) => {
   }
 });
 
-ipcMain.handle('auth:google', async () => {
-  const result = await googleAuth.signIn();
-  // bring ClipDows back to the front once the browser step is done
-  if (dashboardWindow) {
-    dashboardWindow.show();
-    if (dashboardWindow.isMinimized()) dashboardWindow.restore();
-    dashboardWindow.focus();
-  }
-  return result;
-});
-
-ipcMain.on('auth:googleCancel', () => googleAuth.cancel());
-
 ipcMain.on('popup:hide', () => {
   if (popupWindow) popupWindow.hide();
 });
@@ -662,6 +660,7 @@ function broadcastPlan() {
 ipcMain.handle('plan:get', () => plan.info());
 ipcMain.handle('plan:setDev', (_evt, t) => { if (app.isPackaged) return plan.info(); plan.setDev(t); broadcastPlan(); return plan.info(); });
 ipcMain.handle('plan:setPaid', (_evt, p) => { plan.setPaid(p || {}); broadcastPlan(); return plan.info(); }); // payments step will call this
+ipcMain.handle('plan:setTrial', (_evt, endsAt) => { plan.setTrial(endsAt); broadcastPlan(); return plan.info(); }); // server-granted trial (verified emails only)
 
 // ---------- Encryption key vault ----------
 // The sync key is protected by Windows DPAPI (via Electron safeStorage): only this Windows
