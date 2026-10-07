@@ -751,15 +751,22 @@ function renderTools() {
 // =====================================================================
 const PLAN_ORDER = ["free", "pro", "max"];
 const PLAN_DEFS = {
-  free: { name: "Free", price: 0, tag: "Everything you need to get started.", feats: ["100 clips of history", "5 pins and 10 snippets", "1 linked phone", "Sensitive-data guard", "Basic instant actions"] },
-  pro: { name: "Pro", price: 99, tag: "For people who live in their clipboard.", feats: ["1,000 clips of history", "Unlimited pins and paste stack", "3 linked phones with image sync", "All instant actions and data export", "Unlimited screenshot search"] },
-  max: { name: "Max", price: 199, tag: "Every feature, no limits.", feats: ["Everything in Pro", "Unlimited history and snippets", "10 linked phones, 1,000 synced clips", "Snippet triggers and variables", "Time machine"] },
+  free: { name: "Free", price: 0, tag: "Everything you need to get started.", feats: ["100 clips of history", "5 pins and 10 snippets", "1 linked phone", "Sensitive-data guard", "Profile photo sync and ClipDows Guide", "AI Focus preview", "Basic instant actions"] },
+  pro: { name: "Pro", price: 99, tag: "For people who live in their clipboard.", feats: ["1,000 clips of history", "Unlimited pins and paste stack", "3 linked phones with image sync", "AI Focus with up to 8 built-in or custom topics", "Encrypted Focus Review sync · 24-hour reminder · 48-hour expiry", "Profile photo sync and guided tour on Windows and PWA", "All instant actions and data export", "Unlimited screenshot search"] },
+  max: { name: "Max", price: 199, tag: "Every power feature, with the highest limits.", feats: ["Everything in Pro", "Unlimited history and snippets", "10 linked phones, 1,000 synced clips", "AI Focus with up to 16 built-in or custom topics", "Encrypted Focus Review sync · 24-hour reminder · 48-hour expiry", "Profile photo sync and guided tour on Windows and PWA", "Snippet triggers, variables, and Time Machine"] },
 };
 const PLAN_COMPARE = [
   { group: "History & storage", rows: [["Clipboard history", "100 clips", "1,000 clips", "Unlimited"], ["Pinned items", "5", "Unlimited", "Unlimited"], ["Snippets", "10", "100", "Unlimited"], ["Paste stack", "5 items", "Unlimited", "Unlimited"], ["Search inside screenshots", "5 / month", "Unlimited", "Unlimited"]] },
   { group: "Sync & devices", rows: [["Linked phones", "1", "3", "10"], ["Synced clips", "25", "200", "1,000"], ["Image sync", false, true, true]] },
   { group: "Productivity", rows: [["Instant actions", "Basic", "All actions", "All actions"], ["App filters and ignored apps", false, true, true], ["Custom secret expiry", false, true, true], ["Export your data", false, true, true]] },
-  { group: "Power tools", rows: [["Snippet variables", false, false, true], ["Snippet triggers", false, false, true], ["Time machine", false, false, true]] },
+  { group: "Focus & account", rows: [
+    ["AI Focus mode and classification", "Preview", "On-device Windows classification", "On-device Windows classification"],
+    ["AI Focus topics", "Preview", "Up to 8 · built-in or custom", "Up to 16 · built-in or custom"],
+    ["Focus Review", "Preview", "Encrypted cross-device sync", "Encrypted cross-device sync"],
+    ["Review reminder and automatic expiry", false, "Reminder at 24h · expires at 48h", "Reminder at 24h · expires at 48h"],
+    ["Profile photo upload, circle crop, and account sync", true, true, true],
+    ["ClipDows Guide · automatic tour and replay in Settings", true, true, true] ] },
+  { group: "Max tools", rows: [["Snippet variables", false, false, true], ["Snippet triggers", false, false, true], ["Time machine", false, false, true]] },
 ];
 function buyOnPc(tier) {
   openOverlay((c) => {
