@@ -7,6 +7,8 @@
   "scripts": {
     "start": "electron .",
     "rebuild": "electron-rebuild",
+    "download:focus-model": "node scripts/download-focus-model.js",
+    "eval:focus-model": "node scripts/evaluate-focus-model.js",
     "dist": "electron-builder --win --x64 --publish never",
     "build:store-helper": "node scripts/build-store-update-helper.js",
     "dist:msix": "npm run build:store-helper && electron-builder --win dir --x64 --publish never && node scripts/package-msix.js",
@@ -16,6 +18,7 @@
   "author": "Ayushmanbuilds",
   "license": "UNLICENSED",
   "dependencies": {
+    "@huggingface/transformers": "4.3.1",
     "@nut-tree-fork/nut-js": "^4.2.0",
     "active-win": "^8.2.1",
     "electron-store": "^8.2.0",
@@ -45,7 +48,12 @@
     ],
     "asarUnpack": [
       "assets/tessdata/**",
+      "assets/focus-model/**",
       "build/store-update/**",
+      "node_modules/@huggingface/**",
+      "node_modules/@img/**",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/sharp/**",
       "node_modules/@nut-tree-fork/**",
       "node_modules/active-win/**",
       "node_modules/uiohook-napi/**"

@@ -22,6 +22,9 @@ const sensitive = require('./sensitive');
 const sourceApp = require('./sourceApp');
 const ocr = require('./ocr');
 const plan = require('./plan');
+const focusReview = require('./focusReview');
+const focusClassifier = require('./ai/classifier');
+const { TOPICS } = require('./ai/topics');
 const snippets = require('./snippets');
 const triggers = require('./triggers');
 const updater = require('./updater');
@@ -63,6 +66,13 @@ function updateDashboardTitleBar() {
     symbolColor: currentThemeDark ? '#CBD5E1' : '#475569',
     height: 40,
   });
+}
+
+function dashboardWindowMode() {
+  return dashboardWindow && (dashboardWindow.isMaximized() || dashboardWindow.isFullScreen()) ? 'maximized' : 'windowed';
+}
+function broadcastDashboardWindowMode() {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send('window:dashboardModeChanged', dashboardWindowMode());
 }
 
 function broadcastWallpaper(wallpaper) {
@@ -137,8 +147,13 @@ function createDashboardWindow(opts) {
   });
 
   dashboardWindow.loadFile(path.join(__dirname, '..', 'dashboard', 'dashboard.html'));
+  dashboardWindow.on('maximize', broadcastDashboardWindowMode);
+  dashboardWindow.on('unmaximize', broadcastDashboardWindowMode);
+  dashboardWindow.on('enter-full-screen', broadcastDashboardWindowMode);
+  dashboardWindow.on('leave-full-screen', broadcastDashboardWindowMode);
 
   dashboardWindow.once('ready-to-show', () => {
+    broadcastDashboardWindowMode();
     if (!startHidden) dashboardWindow.show();
   });
 
@@ -273,20 +288,10 @@ app.whenReady().then(() => {
   registerShortcuts();
   registerStackShortcuts();
   triggers.init({ watcher, autoPaste });
-  watcher.start((newItem) => {
-    if (dashboardWindow) dashboardWindow.webContents.send('items:updated', newItem);
-    // Push every freshly-captured item up to Firestore too, so it's on the
-    // phone in real time. The renderer owns the Firebase session (it's
-    // already signed in there), so main.js just hands the item off.
-    // Secrets caught by the sensitive-data guard are NEVER uploaded.
-    const L = plan.limits();
-    if (dashboardWindow && !newItem.sensitive && (newItem.type !== 'image' || L.syncImages)) {
-      dashboardWindow.webContents.send('cloud:push', { ...newItem, syncCap: L.syncItems });
-    }
-    if (L.history > 0) db.enforceRetention(L.history * 3); // keep storage bounded; older clips beyond the plan window are locked, not deleted right away
-    pushToStack(newItem);
-    if (newItem.type === 'image' && prefs.ocr) ocr.enqueue(newItem, () => notifyItemsChanged(null));
+  watcher.start(handleStoredItem, () => {
+    if (dashboardWindow) dashboardWindow.webContents.send('focusReview:changed');
   });
+  setInterval(notifyFocusReview, 60 * 1000);
   setInterval(purgeSensitive, 5000); // auto-expire secrets
 
   // The dashboard window is what restores the sign-in and runs the phone sync, so it must exist
@@ -324,6 +329,40 @@ function notifyItemsChanged(payload = null) {
   triggers.refresh();
   if (dashboardWindow) dashboardWindow.webContents.send('items:updated', payload);
   if (popupWindow) popupWindow.webContents.send('items:updated', payload);
+}
+
+function handleStoredItem(newItem) {
+  if (dashboardWindow) dashboardWindow.webContents.send('items:updated', newItem);
+  const L = plan.limits();
+  if (dashboardWindow && !newItem.sensitive && (newItem.type !== 'image' || L.syncImages)) {
+    dashboardWindow.webContents.send('cloud:push', { ...newItem, syncCap: L.syncItems });
+  }
+  if (L.history > 0) db.enforceRetention(L.history * 3);
+  pushToStack(newItem);
+  if (newItem.type === 'image' && prefs.ocr) ocr.enqueue(newItem, () => notifyItemsChanged(null));
+}
+
+function notifyFocusReview() {
+  const { count, reminderCount, expiredCount, earliestExpiryMs } = focusReview.sweep();
+  if ((expiredCount || reminderCount) && dashboardWindow) dashboardWindow.webContents.send('focusReview:changed');
+  if (!count || !reminderCount) return;
+  const hoursLeft = Math.max(1, Math.ceil(earliestExpiryMs / (60 * 60 * 1000)));
+  try {
+    if (!Notification.isSupported()) return;
+    const notification = new Notification({
+      title: 'A few clips are waiting in Focus Review',
+      body: `${reminderCount} clip${reminderCount === 1 ? '' : 's'} waiting. The first expires in about ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'}; check if you want to keep anything.`,
+      silent: true,
+      icon: loadAppIcon(),
+    });
+    notification.on('click', () => {
+      createDashboardWindow();
+      setTimeout(() => {
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send('focusReview:open');
+      }, 250);
+    });
+    notification.show();
+  } catch (err) { console.warn('[focus] review reminder failed:', err.message); }
 }
 
 // ---------- sensitive items: auto-expiry ----------
@@ -400,11 +439,36 @@ function registerStackShortcuts() {
 ipcMain.handle('session:set', (_evt, uid) => {
   db.setUser(uid || null);
   plan.load(uid || null);
+  focusReview.setUser(uid || null);
   stack = []; stackActive = false; refreshStackTip();
   purgeSensitive();                       // drop secrets that expired while the app was closed
   if (uid && prefs.ocr) ocr.backfill(() => notifyItemsChanged(null));
   notifyItemsChanged(null);
+  if (uid) notifyFocusReview();
   return { ok: true };
+});
+
+ipcMain.handle('focusReview:list', () => focusReview.list());
+ipcMain.handle('focusReview:exportSync', () => focusReview.exportSyncState());
+ipcMain.handle('focusReview:mergeSync', (_evt, state) => {
+  const result = focusReview.mergeSyncState(state);
+  if (result.changed && dashboardWindow) dashboardWindow.webContents.send('focusReview:changed');
+  return result;
+});
+ipcMain.handle('focusReview:delete', (_evt, id) => {
+  const ok = focusReview.remove(String(id || ''));
+  if (ok && dashboardWindow) dashboardWindow.webContents.send('focusReview:changed');
+  return { ok };
+});
+ipcMain.handle('focusReview:keep', (_evt, id) => {
+  const row = focusReview.get(String(id || ''));
+  if (!row || !db.hasSession()) return { ok: false };
+  const saved = db.insertItem({ ...row, updated_at: Date.now() });
+  if (!saved) return { ok: false };
+  focusReview.remove(row.id);
+  handleStoredItem(saved);
+  if (dashboardWindow) dashboardWindow.webContents.send('focusReview:changed');
+  return { ok: true, item: saved };
 });
 
 ipcMain.handle('items:get', (_evt, opts) => {
@@ -598,8 +662,19 @@ ipcMain.handle('theme:clearWallpaper', () => {
 
 ipcMain.on('settings:apply', (_evt, s) => {
   const L = plan.limits();
+  const previousFocusCapture = prefs.focusCapture;
   currentThemeDark = !!s.dark;
-  prefs.set({ ...s, ignoredApps: L.appFilter ? s.ignoredApps : '', secretTtl: L.customExpiry ? s.secretTtl : 0 }); // Pro features
+  const validTopics = new Set(TOPICS.map((topic) => topic.id));
+  const focusTopics = L.focusTopics > 0 && Array.isArray(s.focusTopics)
+    ? [...new Set(s.focusTopics.filter((id) => validTopics.has(id)))].slice(0, L.focusTopics)
+    : [];
+  const customTopics = L.focusTopics > focusTopics.length && Array.isArray(s.focusCustomTopics)
+    ? s.focusCustomTopics.filter((topic) => topic && typeof topic.id === 'string' && /^custom-[a-z0-9-]+$/.test(topic.id)
+      && typeof topic.label === 'string' && topic.label.trim() && typeof topic.prompt === 'string' && topic.prompt.trim())
+      .slice(0, L.focusTopics - focusTopics.length).map((topic) => ({ id: topic.id, label: topic.label.trim().slice(0, 40), prompt: topic.prompt.trim().slice(0, 240) }))
+    : [];
+  prefs.set({ ...s, focusCapture: L.focusTopics > 0 && !!s.focusCapture && focusTopics.length + customTopics.length > 0, focusTopics, focusCustomTopics: customTopics, ignoredApps: L.appFilter ? s.ignoredApps : '', secretTtl: L.customExpiry ? s.secretTtl : 0 }); // plan-gated settings
+  if (previousFocusCapture !== prefs.focusCapture) broadcastFocusCaptureState();
   try {
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!s.startup, args: ['--hidden'] });
     if (s.tray === false && tray) { tray.destroy(); tray = null; }
@@ -653,7 +728,11 @@ ipcMain.handle('cloud:deviceLinked', (_evt, device) => {
 
 // ---------- Plans ----------
 function broadcastPlan() {
-  if (dashboardWindow) dashboardWindow.webContents.send('plan:changed', plan.info());
+  [dashboardWindow, popupWindow].forEach((win) => {
+    if (win && !win.isDestroyed()) win.webContents.send('plan:changed', plan.info());
+  });
+  if (plan.limits().focusTopics === 0 && prefs.focusCapture) prefs.set({ focusCapture: false });
+  broadcastFocusCaptureState();
   triggers.refresh();
   notifyItemsChanged(null);
 }
@@ -706,4 +785,25 @@ ipcMain.handle('shortcut:set', (_evt, accelerator) => {
   }
   saveHotkey(next);
   return { ok: true, accelerator: next };
+});
+
+function focusCaptureState() {
+  const limit = plan.limits().focusTopics;
+  return { tier: plan.tier(), enabled: !!prefs.focusCapture, available: limit > 0, hasTopics: prefs.focusTopics.length + prefs.focusCustomTopics.length > 0 };
+}
+function broadcastFocusCaptureState() {
+  const state = focusCaptureState();
+  [dashboardWindow, popupWindow].forEach((win) => {
+    if (win && !win.isDestroyed()) win.webContents.send('focusCapture:changed', state);
+  });
+  return state;
+}
+ipcMain.handle('focusCapture:getState', () => focusCaptureState());
+ipcMain.handle('window:getDashboardMode', () => dashboardWindowMode());
+ipcMain.handle('focusCapture:setEnabled', (_evt, enabled) => {
+  const state = focusCaptureState();
+  if (enabled && !state.available) return { ok: false, reason: 'plan', ...state };
+  if (enabled && !state.hasTopics) return { ok: false, reason: 'topics', ...state };
+  prefs.set({ focusCapture: !!enabled });
+  return { ok: true, ...broadcastFocusCaptureState() };
 });

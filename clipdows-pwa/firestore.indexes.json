@@ -1,0 +1,10 @@
+{
+  "indexes": [
+    { "collectionGroup": "presence", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "platform", "order": "ASCENDING" }, { "fieldPath": "lastSeen", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "linkedDevices", "fieldPath": "fcmToken",
+      "indexes": [ { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] }
+  ]
+}

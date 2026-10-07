@@ -60,6 +60,8 @@ function hasSession() {
   return !!currentUid;
 }
 
+function getUserId() { return currentUid; }
+
 const flatPreview = (text) => {
   const flat = String(text || '').replace(/\s+/g, ' ').trim();
   return flat.length > 140 ? flat.slice(0, 140) + '…' : flat;
@@ -310,6 +312,7 @@ module.exports = {
   db,
   setUser,
   hasSession,
+  getUserId,
   insertItem,
   isDuplicateOfLatest,
   getItem,

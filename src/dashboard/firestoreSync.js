@@ -35,6 +35,7 @@ const ECHO_WINDOW_MS = 30 * 1000;
 let currentUid = null;
 let unsubItems = null;
 let unsubPairing = null;
+let unsubSharedMeta = null;
 let pushHandlerRegistered = false;
 let sourceTag = 'desktop:' + (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
 
@@ -138,6 +139,15 @@ function saveSeen() {
 const receivedFromPhone = new Map(); // normalized text -> timestamp
 let lastPhoneImageAt = 0;
 let lastPush = { key: '', at: 0 };
+const FOCUS_REVIEW_PREFIX = 'focusReview_';
+const FOCUS_REVIEW_TOMBSTONE_MS = 30 * 24 * 60 * 60 * 1000;
+let sharedReadyUid = null;
+let pendingSharedWrites = {};
+let reviewVersions = new Map();
+let reviewSyncTimer = null;
+let reviewSyncRunning = false;
+let reviewSyncAgain = false;
+let reviewSyncGeneration = 0;
 function rememberReceived(data) {
   if (data.type === 'image') lastPhoneImageAt = Date.now();
   else receivedFromPhone.set(norm(data.content), Date.now());
@@ -199,6 +209,151 @@ function publishPlan(info) {
   flushPlan();
 }
 
+// Account-shared profile and Focus settings use the same owner-only `meta`
+// documents as the plan. Linked devices already have read access to this path.
+function publishSharedDoc(name, data) {
+  if (!currentUid) return;
+  if (sharedReadyUid !== currentUid) { pendingSharedWrites[name] = data; return; }
+  const uid = currentUid;
+  setDoc(doc(db, 'users', uid, 'meta', name), { ...data, updatedAt: Number(data.updatedAt) || Date.now() })
+    .catch((err) => {
+      console.warn(`[firestoreSync] could not publish ${name}:`, err.message);
+      setTimeout(() => { if (currentUid === uid) publishSharedDoc(name, data); }, 10000);
+    });
+}
+
+function publishProfilePhoto(photoDataUrl, updatedAt = Date.now()) {
+  if (photoDataUrl && (!/^data:image\/(?:webp|jpeg|png);base64,/i.test(photoDataUrl) || photoDataUrl.length > 350000)) {
+    console.warn('[firestoreSync] profile photo is not a supported compact image'); return;
+  }
+  publishSharedDoc('profile', { photoDataUrl: photoDataUrl || '', updatedAt: Number(updatedAt) || Date.now() });
+}
+
+function publishFocusSettings(settings, updatedAt = Date.now()) {
+  if (!settings || typeof settings !== 'object') return;
+  const builtins = Array.isArray(settings.focusTopics) ? [...new Set(settings.focusTopics.filter((x) => typeof x === 'string'))].slice(0, 26) : [];
+  const custom = Array.isArray(settings.focusCustomTopics) ? settings.focusCustomTopics
+    .filter((x) => x && typeof x.id === 'string' && typeof x.label === 'string' && typeof x.prompt === 'string')
+    .map((x) => ({ id: x.id.slice(0, 80), label: x.label.slice(0, 40), prompt: x.prompt.slice(0, 240) })).slice(0, 26) : [];
+  publishSharedDoc('focusSettings', { focusCapture: !!settings.focusCapture, focusTopics: builtins, focusCustomTopics: custom, updatedAt: Number(updatedAt) || Date.now() });
+}
+
+function reviewDocumentId(id) {
+  // Clipboard IDs are generated locally; encoding prevents a value from
+  // introducing a Firestore path separator.
+  return FOCUS_REVIEW_PREFIX + btoa(unescape(encodeURIComponent(String(id))))
+    .split('+').join('-').split('/').join('_').replace(/=+$/g, '');
+}
+
+async function publishFocusReviewState() {
+  if (reviewSyncRunning) { reviewSyncAgain = true; return; }
+  if (!currentUid || sharedReadyUid !== currentUid || !cryptoKey || !window.clipdows?.exportFocusReviewSync) return;
+  reviewSyncRunning = true;
+  const uid = currentUid;
+  const generation = reviewSyncGeneration;
+  try {
+    const state = await window.clipdows.exportFocusReviewSync();
+    if (currentUid !== uid || !cryptoKey) return;
+    const writes = [];
+    for (const row of state.rows || []) {
+      if (currentUid !== uid || generation !== reviewSyncGeneration) return;
+      if (!row || typeof row.id !== 'string') continue;
+      const updatedAt = Number(row.updated_at) || Number(row.reviewed_at) || Date.now();
+      if (reviewVersions.get(row.id) === updatedAt) continue;
+      const payload = await encryptWith(cryptoKey, row);
+      writes.push(setDoc(doc(db, 'users', uid, 'meta', reviewDocumentId(row.id)), {
+        kind: 'focusReview', reviewId: row.id, updated_at: updatedAt,
+        expires_at: Number(row.expires_at) || 0, payload,
+      }));
+      reviewVersions.set(row.id, updatedAt);
+    }
+    for (const mark of state.tombstones || []) {
+      if (currentUid !== uid || generation !== reviewSyncGeneration) return;
+      if (!mark || typeof mark.id !== 'string') continue;
+      const deletedAt = Number(mark.deleted_at) || Date.now();
+      if (reviewVersions.get(mark.id) === -deletedAt) continue;
+      writes.push(setDoc(doc(db, 'users', uid, 'meta', reviewDocumentId(mark.id)), {
+        kind: 'focusReview', reviewId: mark.id, deleted_at: deletedAt, updated_at: deletedAt,
+      }));
+      reviewVersions.set(mark.id, -deletedAt);
+    }
+    await Promise.all(writes);
+  } catch (err) {
+    if (generation === reviewSyncGeneration) {
+      reviewVersions = new Map();
+      console.warn('[firestoreSync] Focus Review sync failed:', err.message);
+      scheduleFocusReviewSync(10000);
+    }
+  }
+  finally {
+    if (generation !== reviewSyncGeneration) return;
+    reviewSyncRunning = false;
+    if (reviewSyncAgain) { reviewSyncAgain = false; scheduleFocusReviewSync(250); }
+  }
+}
+
+function scheduleFocusReviewSync(delay = 500) {
+  clearTimeout(reviewSyncTimer);
+  reviewSyncTimer = setTimeout(publishFocusReviewState, delay);
+}
+
+function startSharedMeta(uid) {
+  if (unsubSharedMeta) unsubSharedMeta();
+  sharedReadyUid = null;
+  pendingSharedWrites = {};
+  reviewVersions = new Map();
+  let initial = true;
+  unsubSharedMeta = onSnapshot(collection(db, 'users', uid, 'meta'), async (snap) => {
+    if (currentUid !== uid) return;
+    const reviewState = { rows: [], tombstones: [] };
+    let hasProfile = false, hasFocusSettings = false;
+    const remoteUpdatedAt = { profile: 0, focusSettings: 0 };
+    for (const entry of snap.docs) {
+      const id = entry.id, data = entry.data();
+      if (id === 'profile') {
+        hasProfile = true;
+        remoteUpdatedAt.profile = Number(data.updatedAt) || 0;
+        window.dispatchEvent(new CustomEvent('clipsync:profilePhoto', { detail: { uid, photoDataUrl: data.photoDataUrl || '', updatedAt: Number(data.updatedAt) || 0 } }));
+      } else if (id === 'focusSettings') {
+        hasFocusSettings = true;
+        remoteUpdatedAt.focusSettings = Number(data.updatedAt) || 0;
+        window.dispatchEvent(new CustomEvent('clipsync:focusSettings', { detail: { uid, ...data } }));
+      } else if (id.startsWith(FOCUS_REVIEW_PREFIX) && data.kind === 'focusReview' && typeof data.reviewId === 'string') {
+        const deletedAt = Number(data.deleted_at) || 0;
+        if (deletedAt) {
+          if (Date.now() - deletedAt > FOCUS_REVIEW_TOMBSTONE_MS) { deleteDoc(entry.ref).catch(() => {}); continue; }
+          reviewState.tombstones.push({ id: data.reviewId, deleted_at: deletedAt });
+          reviewVersions.set(data.reviewId, -deletedAt);
+        } else if (data.payload && cryptoKey) {
+          try {
+            const row = await decryptWith(cryptoKey, data.payload);
+            reviewState.rows.push(row);
+            reviewVersions.set(data.reviewId, Number(data.updated_at) || Number(row.updated_at) || 0);
+          } catch (err) { console.warn('[firestoreSync] could not decrypt Focus Review item:', err.message); }
+        }
+      }
+    }
+    if (currentUid !== uid) return;
+    if (cryptoKey && !snap.metadata.fromCache) {
+      await window.clipdows.mergeFocusReviewSync?.(reviewState);
+      scheduleFocusReviewSync(100);
+    }
+    if (initial && !snap.metadata.fromCache) {
+      initial = false;
+      sharedReadyUid = uid;
+      window.dispatchEvent(new CustomEvent('clipsync:sharedDataReady', { detail: { uid, hasProfile, hasFocusSettings } }));
+      const queued = pendingSharedWrites; pendingSharedWrites = {};
+      for (const [name, data] of Object.entries(queued)) {
+        const exists = name === 'profile' ? hasProfile : name === 'focusSettings' ? hasFocusSettings : false;
+        if (!exists || Number(data.updatedAt) > (remoteUpdatedAt[name] || 0)) publishSharedDoc(name, data);
+      }
+      scheduleFocusReviewSync(100);
+    }
+  }, (err) => console.warn('[firestoreSync] shared settings listener failed:', err.message));
+}
+
+window.clipdows?.onFocusReviewChanged?.(scheduleFocusReviewSync);
+
 function registerPushHandler() {
   if (pushHandlerRegistered) return;
   pushHandlerRegistered = true;
@@ -243,7 +398,11 @@ export function startClipSync(uid) {
   receivedFromPhone.clear();
   lastPush = { key: '', at: 0 };
   registerPushHandler();
-  ensureKey(uid).then((ok) => { if (ok && currentUid === uid) listenForItems(uid); })
+  ensureKey(uid).then((ok) => {
+    if (currentUid !== uid) return;
+    startSharedMeta(uid);
+    if (ok) listenForItems(uid);
+  })
     .catch((err) => console.error('[firestoreSync] could not set up encryption:', err));
 }
 
@@ -317,6 +476,16 @@ export async function purgePlaintext() {
 export function stopClipSync() {
   if (unsubItems) unsubItems();
   unsubItems = null;
+  if (unsubSharedMeta) unsubSharedMeta();
+  unsubSharedMeta = null;
+  clearTimeout(reviewSyncTimer);
+  reviewSyncTimer = null;
+  reviewSyncGeneration++;
+  reviewSyncAgain = false;
+  reviewSyncRunning = false;
+  sharedReadyUid = null;
+  pendingSharedWrites = {};
+  reviewVersions = new Map();
   cancelPairing();
   currentUid = null;
   cryptoKey = null;
@@ -399,4 +568,4 @@ export async function renameDevice(phoneUid, name) {
 
 // dashboard.js is a plain (non-module) script, so expose everything it needs
 // on window rather than making it deal with ESM imports.
-window.clipSync = { publishPlan, resumeClipSync, purgePlaintext, isUnlocked: () => !!cryptoKey, startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };
+window.clipSync = { publishPlan, publishProfilePhoto, publishFocusSettings, resumeClipSync, purgePlaintext, isUnlocked: () => !!cryptoKey, startClipSync, stopClipSync, beginPairing, cancelPairing, listDevices, revokeDevice, renameDevice };

@@ -4,6 +4,29 @@ const searchInput = document.getElementById('searchInput');
 const tabsEl = document.getElementById('tabs');
 const closeBtn = document.getElementById('closeBtn');
 const expandBtn = document.getElementById('expandBtn');
+const focusToggle = document.getElementById('popupFocusToggle');
+const focusStatus = document.getElementById('popupFocusStatus');
+let focusState = { tier: 'free', enabled: false, available: false, hasTopics: false };
+
+function renderFocusToggle(state = focusState) {
+  focusState = { ...focusState, ...state };
+  document.body.dataset.planTier = focusState.tier || 'free';
+  focusToggle.classList.toggle('is-on', !!focusState.enabled);
+  focusToggle.classList.toggle('is-locked', !focusState.available);
+  focusToggle.setAttribute('aria-pressed', String(!!focusState.enabled));
+  focusToggle.setAttribute('aria-label', focusState.available ? `AI Focus is ${focusState.enabled ? 'on' : 'off'}` : 'AI Focus is a Pro feature');
+  focusToggle.title = !focusState.available ? 'AI Focus · Explore Pro' : focusState.enabled ? 'Turn AI Focus off' : 'Turn AI Focus on';
+  focusStatus.textContent = !focusState.available ? 'Pro' : focusState.enabled ? 'On' : 'Off';
+}
+
+window.clipdows.getPlan().then((info) => renderFocusToggle({ tier: info.tier, available: info.limits.focusTopics > 0 })).catch(() => {});
+window.clipdows.getFocusCaptureState().then(renderFocusToggle).catch(() => {});
+window.clipdows.onPlanChanged((info) => renderFocusToggle({ tier: info.tier, available: info.limits.focusTopics > 0 }));
+window.clipdows.onFocusCaptureChanged(renderFocusToggle);
+focusToggle.addEventListener('click', async () => {
+  const result = await window.clipdows.setFocusCaptureEnabled(!focusState.enabled);
+  if (!result || !result.ok) window.clipdows.openDashboard();
+});
 
 function applyWallpaper(dataUrl) {
   const active = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');

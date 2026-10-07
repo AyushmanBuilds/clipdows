@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // A user's clipboard items: the owner, or a phone uid that appears in that
+    // owner's linkedDevices (written by the desktop app during QR pairing).
+    match /users/{ownerUid}/clipboard_items/{itemId} {
+      allow read, write: if signedIn() && (
+        request.auth.uid == ownerUid ||
+        exists(/databases/$(database)/documents/users/$(ownerUid)/linkedDevices/$(request.auth.uid))
+      );
+    }
+
+    match /users/{ownerUid}/linkedDevices/{deviceUid} {
+      // The owner manages the device list. A linked phone may read, update
+      // and delete its own entry (this is how "Unpair this phone" works).
+      allow read, write: if signedIn() && request.auth.uid == ownerUid;
+      allow read, update, delete: if signedIn() && request.auth.uid == deviceUid;
+    }
+
+    // Short-lived pairing codes created by the desktop app.
+    match /pairings/{code} {
+
+      // Works whether expiresAt is stored as milliseconds or a Timestamp.
+      function notExpired() {
+        return !('expiresAt' in resource.data)
+          || (resource.data.expiresAt is number && resource.data.expiresAt > request.time.toMillis())
+          || (resource.data.expiresAt is timestamp && resource.data.expiresAt > request.time);
+      }
+
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerUid;
+
+      // A phone can fetch ONE code it already knows, but nobody can list all
+      // codes (otherwise anyone could grab a pending code and link to a PC).
+      // The owner may list their own pairing docs.
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      allow update: if signedIn() && (
+        // desktop (owner) can update its own pairing doc
+        request.auth.uid == resource.data.ownerUid
+        ||
+        // a phone can claim a pending, unexpired code, and change nothing else
+        (
+          resource.data.status == 'pending'
+          && notExpired()
+          && request.resource.data.status == 'claimed'
+          && request.resource.data.phoneUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'phoneUid', 'deviceName'])
+        )
+      );
+
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
+    }
+
+    // Encryption settings (meta/crypto) and plan (meta/plan): the owner (desktop app) reads and
+    // writes them; a linked phone may only read them.
+    match /users/{ownerUid}/meta/{docId} {
+      function linkedPhone() {
+        return signedIn()
+          && exists(/databases/$(database)/documents/users/$(ownerUid)/linkedDevices/$(request.auth.uid));
+      }
+      function validProfileWrite() {
+        return docId == 'profile'
+          && request.resource.data.keys().hasOnly(['photoDataUrl', 'updatedAt'])
+          && request.resource.data.photoDataUrl is string
+          && request.resource.data.photoDataUrl.size() <= 350000
+          && request.resource.data.updatedAt is number;
+      }
+      function validFocusSettingsWrite() {
+        return docId == 'focusSettings'
+          && request.resource.data.keys().hasOnly(['focusCapture', 'focusTopics', 'focusCustomTopics', 'updatedAt'])
+          && request.resource.data.focusCapture is bool
+          && request.resource.data.focusTopics is list
+          && request.resource.data.focusTopics.size() <= 26
+          && request.resource.data.focusCustomTopics is list
+          && request.resource.data.focusCustomTopics.size() <= 26
+          && request.resource.data.updatedAt is number;
+      }
+      function validFocusReviewWrite() {
+        return docId.matches('focusReview_.*')
+          && request.resource.data.keys().hasOnly(['kind', 'reviewId', 'updated_at', 'expires_at', 'payload', 'deleted_at'])
+          && request.resource.data.kind == 'focusReview'
+          && request.resource.data.reviewId is string
+          && request.resource.data.reviewId.size() <= 200
+          && request.resource.data.updated_at is number
+          && ((
+            'payload' in request.resource.data
+            && request.resource.data.payload is string
+            && request.resource.data.payload.size() <= 900000
+            && request.resource.data.expires_at is number
+            && request.resource.data.expires_at > request.time.toMillis()
+            && request.resource.data.expires_at <= request.time.toMillis() + 172800000
+            && !('deleted_at' in request.resource.data)
+          ) || (
+            'deleted_at' in request.resource.data
+            && request.resource.data.deleted_at is number
+            && !('payload' in request.resource.data)
+            && !('expires_at' in request.resource.data)
+          ));
+      }
+      allow read: if signedIn() && (
+        request.auth.uid == ownerUid ||
+        exists(/databases/$(database)/documents/users/$(ownerUid)/linkedDevices/$(request.auth.uid))
+      );
+      allow write: if signedIn() && request.auth.uid == ownerUid
+        || (linkedPhone() && (validProfileWrite() || validFocusSettingsWrite() || validFocusReviewWrite()));
+      allow delete: if signedIn() && request.auth.uid == ownerUid
+        || (linkedPhone() && docId.matches('focusReview_.*'));
+    }
+
+    // Presence heartbeat for the admin dashboard: each signed-in client may write only its own doc.
+    match /presence/{uid} {
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['platform', 'lastSeen'])
+        && request.resource.data.platform in ['pwa', 'windows']
+        && request.resource.data.lastSeen == request.time;
+    }
+  }
+}

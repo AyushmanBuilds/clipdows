@@ -15,6 +15,8 @@ The Store build writes `release/ClipDows-<version>-x64-store.msix`. The Store si
 
 The MSIX uses the same Electron directory build as the existing NSIS installer and carries the app's unpacked native modules and bundled OCR data. It declares `runFullTrust` for the clipboard, global hotkey, keyboard-hook, and simulated-paste features. The current package identity is x64-only.
 
+Focus Capture ships its pinned MiniLM ONNX weights and tokenizer under `assets/focus-model`. The existing `assets/**/*` file rule includes them, and `asarUnpack` keeps the model files and ONNX Runtime native files available to the inference runtime. Regenerate missing model files with `npm run download:focus-model` before packaging; the app itself never fetches model files at runtime.
+
 The Advanced settings page includes an in-app Store update flow. `npm run dist:msix` compiles the small Windows Store API bridge and packages it with the app. The Store checks for the current package's published update, downloads it while the app remains open, and reports progress to the in-app bar. After download, the user chooses **Restart to install**; the Store may show its own confirmation UI and Windows may close/relaunch the app during installation.
 
 ## Feature checks before Store release

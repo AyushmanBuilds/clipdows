@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pair ClipDows</title>
+<link rel="manifest" href="/manifest.json" />
+<link rel="stylesheet" href="/style.css?v=20260930032113" />
+<meta name="theme-color" content="#0E0F15" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" />
+<script>try{var s=JSON.parse(localStorage.getItem("clipdows.settings")||"{}");document.documentElement.dataset.theme=s.theme||"auto";document.documentElement.dataset.accent=s.accent||"violet";document.documentElement.dataset.compact=s.compact?"1":"0";}catch(e){}</script>
+<script>
+  // Registered ASAP, before app.js (a module, which loads slightly later)
+  // even starts — Chrome can fire this early, and missing it means no
+  // install prompt is available later on this page load.
+  window.__deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.__deferredInstallPrompt = e;
+    window.dispatchEvent(new CustomEvent('clipdows:installable'));
+  });
+  window.addEventListener('appinstalled', () => {
+    window.__deferredInstallPrompt = null;
+    window.dispatchEvent(new CustomEvent('clipdows:installed'));
+  });
+</script>
+</head>
+<body>
+  <div class="shell">
+    <div class="center-view">
+      <div class="pair-card">
+        <div class="brand"><img class="brand-mark" src="/icon-192.png" alt="" /><span>ClipDows</span></div>
+        <h1 id="pairTitle">Connecting…</h1>
+        <p id="pairDesc">Setting things up.</p>
+        <input class="pair-input" id="codeInput" maxlength="6" placeholder="ABC123" hidden />
+        <button class="primary-btn" id="pairBtn" hidden disabled>Pair device</button>
+        <div class="pair-status" id="pairStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Install-as-app popup, shown right after a successful pair ===== -->
+  <div class="install-overlay" id="installOverlay" hidden>
+    <div class="install-card">
+      <img src="/icon-192.png" alt="" />
+      <h2 id="installTitle">Install ClipDows</h2>
+      <p id="installDesc">Add it to your home screen so it opens like a real app — and so it shows up instantly when you share a photo or file from anywhere on your phone.</p>
+      <ol class="install-steps" id="installSteps" hidden></ol>
+      <div class="install-actions">
+        <button class="primary-btn" id="installNowBtn">Install</button>
+        <button class="install-skip" id="installSkipBtn">Not now</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js?v=20260930032113"></script>
+  <script type="module">
+    const statusEl = document.getElementById('pairStatus');
+    const titleEl = document.getElementById('pairTitle');
+    const descEl = document.getElementById('pairDesc');
+    const codeInput = document.getElementById('codeInput');
+    const pairBtn = document.getElementById('pairBtn');
+
+    const params = new URLSearchParams(location.search);
+    const codeFromQr = params.get('code');
+    let appReady = false;
+
+    function showManualEntry() {
+      titleEl.textContent = 'Enter pairing code';
+      descEl.textContent = 'Open ClipDows on your PC → Devices → Add Device, and type the 6-character code shown there.';
+      codeInput.hidden = false;
+      pairBtn.hidden = false;
+    }
+
+    async function doPair(code) {
+      if (!appReady) {
+        statusEl.className = 'pair-status error';
+        statusEl.textContent = 'Still connecting — try again in a moment.';
+        return;
+      }
+      statusEl.className = 'pair-status';
+      statusEl.textContent = 'Connecting…';
+      pairBtn.disabled = true;
+      try {
+        const deviceName = guessDeviceName();
+        await window.ClipDowsApp.claimPairingCode(code, deviceName);
+        statusEl.className = 'pair-status ok';
+        statusEl.textContent = '✓ Paired!';
+        offerInstallThenGo();
+      } catch (err) {
+        statusEl.className = 'pair-status error';
+        statusEl.textContent = err.message || 'Could not pair. Try again.';
+        pairBtn.disabled = false;
+        showManualEntry();
+      }
+    }
+
+    function goToApp() { location.href = '/index.html'; }
+
+    function offerInstallThenGo() {
+      const A = window.ClipDowsApp;
+      if (A.isStandalone()) { setTimeout(goToApp, 500); return; } // already installed, nothing to offer
+
+      const overlay = document.getElementById('installOverlay');
+      const stepsEl = document.getElementById('installSteps');
+      const descEl2 = document.getElementById('installDesc');
+      const installBtn = document.getElementById('installNowBtn');
+      const skipBtn = document.getElementById('installSkipBtn');
+
+      if (A.isIos()) {
+        descEl2.textContent = 'iPhones don\u2019t let apps install themselves — it takes two taps:';
+        stepsEl.hidden = false;
+        stepsEl.innerHTML = '<li>Tap the <strong>Share</strong> icon at the bottom of Safari</li><li>Scroll down and tap <strong>Add to Home Screen</strong></li>';
+        installBtn.textContent = 'Got it';
+        installBtn.onclick = goToApp;
+        skipBtn.onclick = goToApp;
+        overlay.hidden = false;
+        return;
+      }
+
+      if (!A.canPromptInstall()) {
+        // Chrome hasn't decided this page is installable yet (e.g. still
+        // fetching the manifest icons) or already dismissed it earlier this
+        // session — skip straight to the app rather than show a dead button.
+        setTimeout(goToApp, 500);
+        return;
+      }
+
+      overlay.hidden = false;
+      installBtn.onclick = async () => {
+        installBtn.disabled = true;
+        const choice = await A.promptInstall();
+        overlay.hidden = true;
+        goToApp();
+      };
+      skipBtn.onclick = () => { overlay.hidden = true; goToApp(); };
+    }
+
+    function guessDeviceName() {
+      const ua = navigator.userAgent;
+      const m = ua.match(/;\s*([^;)]+)\)\s*AppleWebKit/);
+      return (m && m[1]) ? m[1].trim() : 'Android phone';
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      titleEl.textContent = codeFromQr ? 'Pairing with your PC…' : 'Connecting…';
+      descEl.textContent = codeFromQr ? 'Confirming the connection.' : 'Setting things up.';
+
+      window.clipdowsWaitReady().then(() => {
+        appReady = true;
+        pairBtn.disabled = false;
+        if (codeFromQr) {
+          doPair(codeFromQr);
+        } else {
+          showManualEntry();
+        }
+      }).catch((err) => {
+        statusEl.className = 'pair-status error';
+        statusEl.textContent = 'Could not connect: ' + (err.message || 'unknown error') + '. Check your internet connection and reload.';
+        showManualEntry();
+        pairBtn.disabled = true;
+      });
+    });
+
+    pairBtn.addEventListener('click', () => doPair(codeInput.value));
+    codeInput.addEventListener('input', () => { codeInput.value = codeInput.value.toUpperCase(); });
+  </script>
+</body>
+</html>

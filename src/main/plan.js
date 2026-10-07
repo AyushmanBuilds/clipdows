@@ -8,11 +8,11 @@ const DAY = 86400000;   // the 14-day trial itself is granted by the server (fun
 
 const LIMITS = {
   free: { history: 100, pinned: 5, snippets: 10, phones: 1, syncItems: 25, syncImages: false, stack: 5, ocrPerMonth: 5,
-          appFilter: false, export: false, customExpiry: false, actions: 'basic', variables: false, triggers: false, timeMachine: false },
+          appFilter: false, export: false, customExpiry: false, actions: 'basic', variables: false, triggers: false, timeMachine: false, focusTopics: 0 },
   pro:  { history: 1000, pinned: -1, snippets: 100, phones: 3, syncItems: 200, syncImages: true, stack: -1, ocrPerMonth: -1,
-          appFilter: true, export: true, customExpiry: true, actions: 'full', variables: false, triggers: false, timeMachine: false },
+          appFilter: true, export: true, customExpiry: true, actions: 'full', variables: false, triggers: false, timeMachine: false, focusTopics: 8 },
   max:  { history: -1, pinned: -1, snippets: -1, phones: 10, syncItems: 1000, syncImages: true, stack: -1, ocrPerMonth: -1,
-          appFilter: true, export: true, customExpiry: true, actions: 'full', variables: true, triggers: true, timeMachine: true },
+          appFilter: true, export: true, customExpiry: true, actions: 'full', variables: true, triggers: true, timeMachine: true, focusTopics: 16 },
 };
 
 let uid = null;

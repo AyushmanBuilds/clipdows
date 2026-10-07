@@ -9,6 +9,7 @@ const PATHS = {
   image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/>',
   code: '<path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/>',
   file: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/>',
+  sparkles: '<path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
   snippet: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -38,10 +39,15 @@ const PATHS = {
   zap: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
   crown: '<path d="m3 8 4.5 4L12 5l4.5 7L21 8l-2 11H5z"/><path d="M5 19h14"/>',
   gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v15M8 7h8M8 11h8"/>',
+  play: '<path d="m8 5 12 7-12 7z"/>',
 };
 const svg = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${PATHS[n] || ''}</svg>`;
 function hydrate(root = document) { root.querySelectorAll('i[data-i]').forEach((el) => { el.innerHTML = svg(el.dataset.i); }); }
 hydrate();
+function setDashboardWindowMode(mode) { document.body.dataset.windowMode = mode === 'maximized' ? 'maximized' : 'windowed'; }
+window.clipdows.getDashboardWindowMode().then(setDashboardWindowMode).catch(() => setDashboardWindowMode('windowed'));
+window.clipdows.onDashboardWindowModeChanged(setDashboardWindowMode);
 
 function setBtn(btn, icon, label) { btn.innerHTML = `<i data-i="${icon}"></i><span>${label}</span>`; hydrate(btn); }
 
@@ -170,16 +176,107 @@ signOutBtn.addEventListener('click', async () => {
 
 // ---------- one-time notice: ClipDows starts with Windows and keeps running in the tray ----------
 const BG_NOTICE_KEY = 'clipdows:bgNoticeSeen:v1';
+const GUIDE_SEEN_PREFIX = 'clipdows:guideSeen:v1:';
+const GUIDE_STEPS = [
+  { selector: '#navGroup .nav-item[data-type="all"]', title: 'Your clipboard, organized.', text: 'New copies appear in All Items. Use the left side to jump straight to pins, text, links, images, code, snippets, Focus Review, or Trash.' },
+  { selector: '#searchInput', title: 'Find it in a moment.', text: 'Search saved clipboard text from here. Ctrl+F brings focus to this field whenever you need it.' },
+  { selector: '#chips', title: 'Narrow down the view.', text: 'These filters, the sort menu, and the grid/list switch help you shape the library without changing or deleting any clips.' },
+  { selector: '#newSnippetBtn', title: 'Save a useful snippet.', text: 'Create reusable text from New Snippet. Your snippets are available from the left navigation and the Snippets filter.' },
+  { selector: 'focus-toggle', title: 'Make copying feel focused.', text: 'AI Focus matches new text, code, and links against your chosen topics on this PC. Filtered clips wait in Focus Review for 48 hours.' },
+  { selector: '#timeMachineBtn', title: 'Revisit an earlier moment.', text: 'Time Machine can restore a previous clipboard state on Max. Pinning and Trash remain available from each clip card.' },
+  { selector: '#openSettingsBtn', title: 'Your guide is always nearby.', text: 'Settings holds your shortcuts, sync, privacy, appearance, AI Focus topics, and this ClipDows Guide. Reopen the tour whenever you need it.' },
+];
+let guideIndex = 0;
+let guideTarget = null;
+let currentGuideUid = null;
+let pendingFirstGuideUid = null;
+function guideSeenKey(uid) { return GUIDE_SEEN_PREFIX + String(uid || ''); }
+function getGuideTarget(step) {
+  if (step.selector === 'focus-toggle') return [...document.querySelectorAll('[data-focus-toggle]')].find((el) => el.getClientRects().length);
+  return document.querySelector(step.selector);
+}
+function renderGuideStep() {
+  if (guideTarget) guideTarget.classList.remove('guide-target-active');
+  const step = GUIDE_STEPS[guideIndex];
+  guideTarget = getGuideTarget(step);
+  if (guideTarget) {
+    guideTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    guideTarget.classList.add('guide-target-active');
+  }
+  $('guideTourStep').textContent = `${String(guideIndex + 1).padStart(2, '0')} / ${String(GUIDE_STEPS.length).padStart(2, '0')}`;
+  $('guideTourTitle').textContent = step.title;
+  $('guideTourText').textContent = step.text;
+  $('guideTourBack').disabled = guideIndex === 0;
+  $('guideTourBack').style.opacity = guideIndex === 0 ? '.45' : '1';
+  $('guideTourNext').textContent = guideIndex === GUIDE_STEPS.length - 1 ? 'Finish' : 'Next';
+  $('guideTourProgress').innerHTML = GUIDE_STEPS.map((_x, i) => `<span class="${i === guideIndex ? 'active' : i < guideIndex ? 'done' : ''}"></span>`).join('');
+  const spotlight = $('guideSpotlight');
+  if (guideTarget) {
+    const r = guideTarget.getBoundingClientRect();
+    const pad = 7;
+    spotlight.hidden = false;
+    spotlight.style.left = `${Math.max(8, r.left - pad)}px`;
+    spotlight.style.top = `${Math.max(8, r.top - pad)}px`;
+    spotlight.style.width = `${Math.min(window.innerWidth - 16, r.width + pad * 2)}px`;
+    spotlight.style.height = `${Math.min(window.innerHeight - 16, r.height + pad * 2)}px`;
+  } else spotlight.hidden = true;
+}
+function startGuide({ automatic = false } = {}) {
+  if (!currentGuideUid) return;
+  setType('all');
+  $('settingsModal').hidden = true;
+  guideIndex = 0;
+  $('guideOverlay').hidden = false;
+  document.body.classList.add('guide-active');
+  if (automatic) { try { localStorage.setItem(guideSeenKey(currentGuideUid), String(Date.now())); } catch { /* guide can still run */ } }
+  requestAnimationFrame(renderGuideStep);
+}
+function closeGuide() {
+  if (guideTarget) guideTarget.classList.remove('guide-target-active');
+  guideTarget = null;
+  $('guideOverlay').hidden = true;
+  document.body.classList.remove('guide-active');
+  if (currentGuideUid) { try { localStorage.setItem(guideSeenKey(currentGuideUid), String(Date.now())); } catch { /* ignore */ } }
+}
+function maybeStartFirstGuide(uid) {
+  if (!uid) return;
+  let seen = false;
+  try { seen = !!localStorage.getItem(guideSeenKey(uid)); } catch { /* offer the tour for this session */ }
+  if (seen) return;
+  if (!$('bgNoticeModal').hidden) { pendingFirstGuideUid = uid; return; }
+  pendingFirstGuideUid = null;
+  setTimeout(() => { if (currentGuideUid === uid && $('appRoot').hidden === false && $('guideOverlay').hidden) startGuide({ automatic: true }); }, 450);
+}
+function nextGuideStep() {
+  if (guideIndex >= GUIDE_STEPS.length - 1) { closeGuide(); return; }
+  guideIndex++;
+  renderGuideStep();
+}
+function previousGuideStep() { if (guideIndex > 0) { guideIndex--; renderGuideStep(); } }
+function finishBgNotice(continueGuide) {
+  try { localStorage.setItem(BG_NOTICE_KEY, String(Date.now())); } catch { /* ignore */ }
+  $('bgNoticeModal').hidden = true;
+  if (continueGuide && pendingFirstGuideUid) maybeStartFirstGuide(pendingFirstGuideUid);
+}
 function maybeShowBgNotice() {
   try { if (localStorage.getItem(BG_NOTICE_KEY)) return; } catch (e) { /* show it anyway */ }
   $('bgNoticeModal').hidden = false;
 }
-function closeBgNotice() {
-  try { localStorage.setItem(BG_NOTICE_KEY, String(Date.now())); } catch (e) { /* ignore */ }
-  $('bgNoticeModal').hidden = true;
-}
+function closeBgNotice() { finishBgNotice(true); }
 $('bgNoticeOk').addEventListener('click', closeBgNotice);
-$('bgNoticeSettings').addEventListener('click', () => { closeBgNotice(); openSettings(); });
+$('bgNoticeSettings').addEventListener('click', () => { finishBgNotice(false); pendingFirstGuideUid = null; openSettings(); });
+$('guideStartBtn').addEventListener('click', () => startGuide());
+$('guideTourNext').addEventListener('click', nextGuideStep);
+$('guideTourBack').addEventListener('click', previousGuideStep);
+$('guideTourSkip').addEventListener('click', closeGuide);
+$('guideTourClose').addEventListener('click', closeGuide);
+window.addEventListener('resize', () => { if (!$('guideOverlay').hidden) renderGuideStep(); });
+document.addEventListener('keydown', (event) => {
+  if ($('guideOverlay').hidden) return;
+  if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeGuide(); return; }
+  if (event.key === 'ArrowRight') { event.preventDefault(); event.stopImmediatePropagation(); nextGuideStep(); }
+  if (event.key === 'ArrowLeft') { event.preventDefault(); event.stopImmediatePropagation(); previousGuideStep(); }
+});
 
 async function applyUser(user) {
   const gated = !!user && !user.emailVerified; // unverified accounts wait on the verify screen
@@ -187,9 +284,13 @@ async function applyUser(user) {
     verifyGate.hidden = true; stopVerifyPoll();
     const name = user.displayName || (user.email || '').split('@')[0];
     const initials = initialsFor(user.displayName, user.email);
+    currentGuideUid = user.uid;
+    profileInitials = initials;
+    $('userAvatar').textContent = $('sUserAvatar').textContent = initials;
+    loadProfilePhoto(user.uid);
+    loadFocusSettingsForUser(user.uid);
     $('userName').textContent = $('sUserName').textContent = name;
     $('userEmail').textContent = $('sUserEmail').textContent = user.email || '';
-    $('userAvatar').textContent = $('sUserAvatar').textContent = initials;
     // Point the local database at THIS account's private file before anything is shown.
     await window.clipdows.setSession(user.uid);
     await loadPlan();
@@ -199,7 +300,14 @@ async function applyUser(user) {
     refresh();
     if (window.clipSync) { window.clipSync.startClipSync(user.uid); loadDevices(); }
     maybeShowBgNotice();
+    maybeStartFirstGuide(user.uid);
   } else {
+    currentGuideUid = null; pendingFirstGuideUid = null;
+    if (!$('guideOverlay').hidden) closeGuide();
+    if (!$('profilePhotoModal').hidden) closeProfilePhotoModal();
+    profileInitials = 'AA';
+    loadProfilePhoto(null);
+    loadFocusSettingsForUser(null);
     appRoot.hidden = true;
     onboarding.hidden = gated;
     verifyGate.hidden = !gated;
@@ -221,6 +329,7 @@ function resetViewState() {
   closeDetail();
   itemsGrid.innerHTML = ''; pinnedGrid.innerHTML = '';
   searchInput.value = ''; currentSearch = ''; currentType = 'all';
+  content.hidden = false; focusReviewView.hidden = true; toolbar.hidden = false;
   navGroup.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.type === 'all'));
   chipsEl.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c.dataset.type === 'all'));
   document.querySelectorAll('[id^="count-"]').forEach((el) => { el.textContent = '0'; });
@@ -245,6 +354,7 @@ const searchInput = $('searchInput'), sortSelect = $('sortSelect');
 const itemsGrid = $('itemsGrid'), pinnedGrid = $('pinnedGrid'), pinnedSection = $('pinnedSection');
 const sectionTitle = $('sectionTitle'), sectionCount = $('sectionCount'), emptyState = $('emptyState');
 const emptyTrashBtn = $('emptyTrashBtn'), content = $('content');
+const toolbar = document.querySelector('.toolbar'), focusReviewView = $('focusReviewView'), focusReviewGrid = $('focusReviewGrid');
 const gridViewBtn = $('gridViewBtn'), listViewBtn = $('listViewBtn');
 const selectModeBtn = $('selectModeBtn'), selBar = $('selBar'), selCount = $('selCount');
 const selAll = $('selAll'), selPin = $('selPin'), selRestore = $('selRestore'), selDelete = $('selDelete');
@@ -256,7 +366,7 @@ const settingsModal = $('settingsModal'), accentRow = $('accentRow');
 const devicesModal = $('devicesModal'), snippetModal = $('snippetModal'), confirmModal = $('confirmModal');
 
 let currentType = 'all', currentSearch = '', currentSort = 'newest';
-let allItems = [], pinnedAll = [], trashItems = [], trashCount = 0;
+let allItems = [], pinnedAll = [], trashItems = [], trashCount = 0, focusReviewItems = [];
 let selectedItem = null;
 let selectMode = false;
 const selected = new Set();
@@ -265,7 +375,7 @@ let visibleIds = [];
 let knownIds = null;
 
 const TYPE_LABEL = { text: 'Text', link: 'Link', image: 'Image', code: 'Code', file: 'File', snippet: 'Snippet' };
-const TITLES = { all: 'Recent Items', pinned: 'Pinned Items', trash: 'Trash', text: 'Text', link: 'Links', image: 'Images', code: 'Code', file: 'Files', snippet: 'Snippets' };
+const TITLES = { all: 'Recent Items', pinned: 'Pinned Items', trash: 'Trash', text: 'Text', link: 'Links', image: 'Images', code: 'Code', snippet: 'Snippets' };
 
 function fmtDate(ts) {
   return new Date(ts).toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -378,6 +488,7 @@ async function loadPlan() {
 }
 function applyPlanUI() {
   if (!planInfo) return;
+  document.body.dataset.planTier = planInfo.tier;
   const label = planInfo.tier === 'max' ? 'Max' : planInfo.tier === 'pro' ? (planInfo.trial ? 'Pro trial' : 'Pro') : 'Free';
   const b = $('planBadge'); b.textContent = label; b.classList.toggle('ok', planInfo.tier !== 'free');
   $('planSub').textContent = planInfo.trial ? `${plural(planInfo.trialDaysLeft, 'day')} left in your free Pro trial.` : planInfo.tier === 'free' ? 'Upgrade for more history, sync and power features.' : 'Thanks for supporting ClipDows.';
@@ -396,6 +507,7 @@ function applyPlanUI() {
   $('snippetVarsHint').hidden = false;
   $('timeMachineBtn').classList.toggle('plan-locked', !planInfo.limits.timeMachine);
   renderPricing();
+  renderFocusSettings();
   applySettings(); // re-send plan-gated settings (ignored apps, secret expiry) to the main process
   if (window.clipSync && window.clipSync.publishPlan) window.clipSync.publishPlan(planInfo); // keep the phone app on the same plan
   if (!appRoot.hidden) refresh();
@@ -407,11 +519,11 @@ $('devPlanSel').addEventListener('change', async (e) => { planInfo = await windo
 const PLAN_ORDER = ['free', 'pro', 'max'];
 const PLAN_DEFS = {
   free: { name: 'Free', price: 0, icon: 'layers', tag: 'Everything you need to get started.',
-    feats: ['100 clips of history', '5 pins and 10 snippets', '1 linked phone', 'Sensitive-data guard', 'Basic instant actions'] },
+    feats: ['100 clips of history', '5 pins and 10 snippets', '1 linked phone', 'Sensitive-data guard', 'Focus Capture preview', 'Basic instant actions'] },
   pro: { name: 'Pro', price: 99, icon: 'zap', tag: 'For people who live in their clipboard.',
-    feats: ['1,000 clips of history', 'Unlimited pins and paste stack', '3 linked phones with image sync', 'All instant actions and data export', 'Unlimited screenshot search'] },
+    feats: ['1,000 clips of history', 'Unlimited pins and paste stack', '3 linked phones with image sync', 'Local Focus Capture · 8 topics incl. custom', '48-hour private review queue', 'All instant actions and data export'] },
   max: { name: 'Max', price: 199, icon: 'crown', tag: 'Every feature, no limits.',
-    feats: ['Everything in Pro', 'Unlimited history and snippets', '10 linked phones, 1,000 synced clips', 'Snippet triggers and variables', 'Time machine'] },
+    feats: ['Everything in Pro', 'Unlimited history and snippets', '10 linked phones, 1,000 synced clips', 'Local Focus Capture · 16 topics incl. custom', '48-hour private review queue', 'Snippet triggers and variables'] },
 };
 const PLAN_COMPARE = [
   { group: 'History & storage', rows: [
@@ -430,6 +542,8 @@ const PLAN_COMPARE = [
     ['Custom secret expiry', false, true, true],
     ['Export your data', false, true, true] ] },
   { group: 'Power tools', rows: [
+    ['Focus Capture topics', 'Plan preview', 'Up to 8, incl. custom', 'Up to 16, incl. custom'],
+    ['Focus Review queue', 'Upgrade preview', '48 hours · local', '48 hours · local'],
     ['Snippet variables', false, false, true],
     ['Snippet triggers', false, false, true],
     ['Time machine', false, false, true] ] },
@@ -662,8 +776,15 @@ async function refresh() {
   knownIds = new Set(allItems.map((i) => i.id));
 
   const counts = { all: allItems.length, pinned: pinnedAll.length, trash: trashCount };
-  ['text', 'link', 'image', 'code', 'file', 'snippet'].forEach((t) => { counts[t] = allItems.filter((i) => i.type === t).length; });
+  ['text', 'link', 'image', 'code', 'snippet'].forEach((t) => { counts[t] = allItems.filter((i) => i.type === t).length; });
+  try { focusReviewItems = await window.clipdows.listFocusReview(); } catch { focusReviewItems = []; }
+  counts.focusReview = focusReviewItems.length;
   Object.keys(counts).forEach((k) => { const el = $(`count-${k}`); if (el) el.textContent = counts[k]; });
+
+  if (currentType === 'focusReview') {
+    renderFocusReview();
+    return;
+  }
 
   const q = currentSearch.toLowerCase();
   // "app:code invoice" -> clips from an app matching "code" that contain "invoice"
@@ -802,6 +923,10 @@ function setType(t) {
   selected.clear(); lastClickedId = null;
   if (!detailPanel.hidden) closeDetail();
   content.scrollTop = 0;
+  const reviewing = t === 'focusReview';
+  content.hidden = reviewing;
+  focusReviewView.hidden = !reviewing;
+  toolbar.hidden = reviewing;
   refresh();
 }
 navGroup.addEventListener('click', (e) => { const b = e.target.closest('.nav-item'); if (b) setType(b.dataset.type); });
@@ -826,6 +951,8 @@ listViewBtn.addEventListener('click', () => setViewMode('list', true));
 
 // ---------- keyboard ----------
 document.addEventListener('keydown', (e) => {
+  if (!$('guideOverlay').hidden) return;
+  if (!$('profilePhotoModal').hidden) { if (e.key === 'Escape') closeProfilePhotoModal(); return; }
   const typing = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable;
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && e.key.toLowerCase() === 'f') { e.preventDefault(); searchInput.focus(); return; }
@@ -1052,15 +1179,218 @@ tagInput.addEventListener('keydown', async (e) => {
 
 // ---------- settings (auto-saved) ----------
 const SETTINGS_KEY = 'clipdows:settings:v2';
-const DEFAULTS = { theme: 'system', a1: '#4F8DF7', a2: '#3B6CF0', tray: true, startup: true, sound: false, compact: false, view: 'grid', guard: true, sourceApp: true, ocr: true, ignoredApps: '', secretTtl: '0' };
+const DEFAULTS = { theme: 'system', a1: '#4F8DF7', a2: '#3B6CF0', tray: true, startup: true, sound: false, compact: false, view: 'grid', guard: true, sourceApp: true, ocr: true, ignoredApps: '', secretTtl: '0', focusCapture: false, focusTopics: [], focusCustomTopics: [] };
 const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
 
 function readSaved() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
+  try {
+    const saved = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+    if (!Array.isArray(saved.focusTopics)) saved.focusTopics = [];
+    if (!Array.isArray(saved.focusCustomTopics)) saved.focusCustomTopics = [];
+    return saved;
+  }
   catch (e) { return { ...DEFAULTS }; }
 }
 let settings = readSaved();
-function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ }
+  if (!currentFocusSettingsUid) return;
+  const data = focusSettingsData(), sig = focusSettingsSignature(data);
+  if (sig === lastFocusSettingsSig) return;
+  lastFocusSettingsSig = sig;
+  focusSettingsUpdatedAt = Date.now();
+  const cached = { ...data, updatedAt: focusSettingsUpdatedAt };
+  try { localStorage.setItem(focusSettingsKey(currentFocusSettingsUid), JSON.stringify(cached)); } catch { /* cloud remains the durable copy */ }
+  window.clipSync?.publishFocusSettings?.(data, focusSettingsUpdatedAt);
+}
+
+// Profile photos are cached locally per Windows account and mirrored to the
+// account's Firestore profile document for linked devices.
+const PROFILE_PHOTO_KEY_PREFIX = 'clipdows:profilePhoto:v1:';
+const PROFILE_PHOTO_TIME_PREFIX = 'clipdows:profilePhotoUpdated:v1:';
+const FOCUS_SETTINGS_KEY_PREFIX = 'clipdows:focusSettings:v1:';
+const FOCUS_SETTINGS_MIGRATION_KEY = 'clipdows:focusSettingsMigrated:v1';
+let currentProfileUid = null;
+let profilePhotoUpdatedAt = 0;
+let currentFocusSettingsUid = null;
+let focusSettingsUpdatedAt = 0;
+let lastFocusSettingsSig = '';
+let profileInitials = 'AA';
+let cropImage = null;
+let cropZoom = 1;
+let cropOffsetX = 0;
+let cropOffsetY = 0;
+let cropPointer = null;
+const profilePhotoCanvas = $('profilePhotoCanvas');
+const profilePhotoCtx = profilePhotoCanvas.getContext('2d');
+
+function profilePhotoKey(uid) { return PROFILE_PHOTO_KEY_PREFIX + String(uid || ''); }
+function profilePhotoTimeKey(uid) { return PROFILE_PHOTO_TIME_PREFIX + String(uid || ''); }
+function focusSettingsKey(uid) { return FOCUS_SETTINGS_KEY_PREFIX + String(uid || ''); }
+function focusSettingsData() {
+  return { focusCapture: !!settings.focusCapture, focusTopics: [...(settings.focusTopics || [])], focusCustomTopics: [...(settings.focusCustomTopics || [])] };
+}
+function focusSettingsSignature(data = focusSettingsData()) { return JSON.stringify(data); }
+function loadFocusSettingsForUser(uid) {
+  currentFocusSettingsUid = uid || null;
+  focusSettingsUpdatedAt = 0;
+  if (!uid) {
+    settings.focusCapture = false; settings.focusTopics = []; settings.focusCustomTopics = [];
+    lastFocusSettingsSig = focusSettingsSignature();
+    saveSettings(); applySettings();
+    return;
+  }
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(focusSettingsKey(uid)) || 'null'); } catch { /* use defaults */ }
+  if (!cached && !localStorage.getItem(FOCUS_SETTINGS_MIGRATION_KEY)) {
+    // Preserve the prior single-user local Focus setup once, for the first account signed in after this update.
+    cached = focusSettingsData();
+    try { localStorage.setItem(FOCUS_SETTINGS_MIGRATION_KEY, uid); } catch { /* cache is optional */ }
+  }
+  if (cached && typeof cached === 'object') {
+    settings.focusCapture = !!cached.focusCapture;
+    settings.focusTopics = Array.isArray(cached.focusTopics) ? cached.focusTopics.filter((x) => typeof x === 'string') : [];
+    settings.focusCustomTopics = Array.isArray(cached.focusCustomTopics) ? cached.focusCustomTopics.filter((x) => x && typeof x.id === 'string' && typeof x.label === 'string' && typeof x.prompt === 'string') : [];
+    focusSettingsUpdatedAt = Number(cached.updatedAt) || 0;
+  } else {
+    settings.focusCapture = false; settings.focusTopics = []; settings.focusCustomTopics = [];
+  }
+  lastFocusSettingsSig = focusSettingsSignature();
+  try { localStorage.setItem(focusSettingsKey(uid), JSON.stringify({ ...focusSettingsData(), updatedAt: focusSettingsUpdatedAt })); } catch { /* local cache is optional */ }
+}
+function applyProfilePhoto(dataUrl = '') {
+  const safePhoto = /^data:image\/(?:jpeg|png|webp);base64,/i.test(dataUrl) ? dataUrl : '';
+  [ $('userAvatar'), $('sUserAvatar') ].forEach((avatar) => {
+    avatar.textContent = safePhoto ? '' : profileInitials;
+    avatar.style.backgroundImage = safePhoto ? `url("${safePhoto}")` : '';
+    avatar.classList.toggle('has-profile-photo', !!safePhoto);
+    avatar.setAttribute('aria-label', safePhoto ? 'Change profile picture' : `Change profile picture for ${profileInitials}`);
+  });
+}
+function loadProfilePhoto(uid) {
+  currentProfileUid = uid || null;
+  let photo = '';
+  try {
+    photo = currentProfileUid ? localStorage.getItem(profilePhotoKey(currentProfileUid)) || '' : '';
+    profilePhotoUpdatedAt = currentProfileUid ? Number(localStorage.getItem(profilePhotoTimeKey(currentProfileUid))) || 0 : 0;
+  } catch { /* keep initials */ }
+  applyProfilePhoto(photo);
+}
+function openProfilePhotoPicker() {
+  if (!currentProfileUid) return;
+  $('profilePhotoInput').value = '';
+  $('profilePhotoInput').click();
+}
+function cropDimensions(size) {
+  const width = cropImage.naturalWidth || cropImage.width;
+  const height = cropImage.naturalHeight || cropImage.height;
+  const scale = size / Math.min(width, height) * cropZoom;
+  const drawnWidth = width * scale;
+  const drawnHeight = height * scale;
+  const maxX = Math.max(0, (drawnWidth - size) / 2);
+  const maxY = Math.max(0, (drawnHeight - size) / 2);
+  const unitScale = size / profilePhotoCanvas.width;
+  const offsetX = Math.max(-maxX, Math.min(maxX, cropOffsetX * unitScale));
+  const offsetY = Math.max(-maxY, Math.min(maxY, cropOffsetY * unitScale));
+  return { drawnWidth, drawnHeight, x: (size - drawnWidth) / 2 + offsetX, y: (size - drawnHeight) / 2 + offsetY };
+}
+function drawProfileCrop(canvas, ctx) {
+  const size = canvas.width;
+  ctx.clearRect(0, 0, size, size);
+  if (!cropImage) return;
+  const { drawnWidth, drawnHeight, x, y } = cropDimensions(size);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(cropImage, x, y, drawnWidth, drawnHeight);
+  ctx.restore();
+}
+function updateProfileCrop() {
+  drawProfileCrop(profilePhotoCanvas, profilePhotoCtx);
+  $('profilePhotoZoomValue').value = `${cropZoom.toFixed(1)}×`;
+  $('profilePhotoZoomValue').textContent = `${cropZoom.toFixed(1)}×`;
+}
+function closeProfilePhotoModal() {
+  $('profilePhotoModal').hidden = true;
+  if (cropImage && typeof cropImage.close === 'function') cropImage.close();
+  cropImage = null;
+  cropPointer = null;
+  profilePhotoCtx.clearRect(0, 0, profilePhotoCanvas.width, profilePhotoCanvas.height);
+}
+async function readProfileImage(file) {
+  if (window.createImageBitmap) return createImageBitmap(file);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read this image.')); };
+    image.src = url;
+  });
+}
+$('profilePhotoInput').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!/^image\/(?:png|jpe?g|webp|gif)$/i.test(file.type) || file.size > 10 * 1024 * 1024) {
+    showToast('Choose a supported image', 'Use a PNG, JPEG, WEBP, or GIF under 10 MB.');
+    return;
+  }
+  try {
+    cropImage = await readProfileImage(file);
+    cropZoom = 1; cropOffsetX = 0; cropOffsetY = 0;
+    $('profilePhotoZoom').value = '1';
+    $('profilePhotoModal').dataset.tier = planInfo ? planInfo.tier : 'free';
+    $('profilePhotoModal').hidden = false;
+    updateProfileCrop();
+  } catch (err) { showToast('Could not open photo', err.message || 'Please choose another image.'); }
+});
+$('profilePhotoZoom').addEventListener('input', (event) => { cropZoom = Number(event.target.value) || 1; updateProfileCrop(); });
+profilePhotoCanvas.addEventListener('pointerdown', (event) => {
+  if (!cropImage) return;
+  cropPointer = { x: event.clientX, y: event.clientY };
+  profilePhotoCanvas.setPointerCapture(event.pointerId);
+});
+profilePhotoCanvas.addEventListener('pointermove', (event) => {
+  if (!cropPointer) return;
+  const rect = profilePhotoCanvas.getBoundingClientRect();
+  const scale = profilePhotoCanvas.width / rect.width;
+  cropOffsetX += (event.clientX - cropPointer.x) * scale;
+  cropOffsetY += (event.clientY - cropPointer.y) * scale;
+  cropPointer = { x: event.clientX, y: event.clientY };
+  updateProfileCrop();
+});
+profilePhotoCanvas.addEventListener('pointerup', () => { cropPointer = null; });
+profilePhotoCanvas.addEventListener('pointercancel', () => { cropPointer = null; });
+$('profilePhotoReset').addEventListener('click', () => { cropZoom = 1; cropOffsetX = 0; cropOffsetY = 0; $('profilePhotoZoom').value = '1'; updateProfileCrop(); });
+$('profilePhotoSave').addEventListener('click', () => {
+  if (!cropImage || !currentProfileUid) return;
+  const output = document.createElement('canvas');
+  output.width = output.height = 256;
+  drawProfileCrop(output, output.getContext('2d'));
+  let photo = output.toDataURL('image/webp', .84);
+  if (photo.length > 350000) photo = output.toDataURL('image/jpeg', .78);
+  if (photo.length > 350000) { showToast('Photo is too large to sync', 'Choose a simpler image and try again.'); return; }
+  const updatedAt = Date.now();
+  try { localStorage.setItem(profilePhotoKey(currentProfileUid), photo); }
+  catch { showToast('Could not save profile photo', 'Your browser storage is full. Remove another custom item and try again.'); return; }
+  profilePhotoUpdatedAt = updatedAt;
+  try { localStorage.setItem(profilePhotoTimeKey(currentProfileUid), String(updatedAt)); } catch { /* optional cache */ }
+  applyProfilePhoto(photo);
+  window.clipSync?.publishProfilePhoto?.(photo, updatedAt);
+  closeProfilePhotoModal();
+  showToast('Profile picture updated', 'Syncing this photo to your linked devices.');
+});
+function cancelProfilePhoto() { closeProfilePhotoModal(); }
+$('profilePhotoClose').addEventListener('click', cancelProfilePhoto);
+$('profilePhotoCancel').addEventListener('click', cancelProfilePhoto);
+$('profilePhotoModal').addEventListener('click', (event) => { if (event.target === $('profilePhotoModal')) cancelProfilePhoto(); });
+$('uploadProfilePicBtn').addEventListener('click', openProfilePhotoPicker);
+$('userAvatar').addEventListener('click', (event) => { event.stopPropagation(); openProfilePhotoPicker(); });
+$('sUserAvatar').addEventListener('click', openProfilePhotoPicker);
+$('userChip').addEventListener('keydown', (event) => {
+  if (event.target !== $('userChip') || !['Enter', ' '].includes(event.key)) return;
+  event.preventDefault(); openSettings('general');
+});
 
 function applySettings() {
   const dark = settings.theme === 'dark' || (settings.theme === 'system' && darkMq.matches);
@@ -1070,7 +1400,10 @@ function applySettings() {
   root.style.setProperty('--accent-2', settings.a2);
   content.classList.toggle('compact', !!settings.compact);
   document.body.classList.toggle('compact', !!settings.compact);
-  if (window.clipdows.applySettings) window.clipdows.applySettings({ tray: settings.tray, startup: settings.startup, dark, guard: settings.guard, sourceApp: settings.sourceApp, ocr: settings.ocr, ignoredApps: settings.ignoredApps, secretTtl: settings.secretTtl });
+  const focusLimit = (planInfo && planInfo.limits.focusTopics) || 0;
+  const selectedBuiltins = settings.focusTopics.slice(0, focusLimit);
+  const selectedCustom = settings.focusCustomTopics.slice(0, Math.max(0, focusLimit - selectedBuiltins.length));
+  if (window.clipdows.applySettings) window.clipdows.applySettings({ tray: settings.tray, startup: settings.startup, dark, guard: settings.guard, sourceApp: settings.sourceApp, ocr: settings.ocr, ignoredApps: settings.ignoredApps, secretTtl: settings.secretTtl, focusCapture: !!(focusLimit > 0 && settings.focusCapture), focusTopics: selectedBuiltins, focusCustomTopics: selectedCustom });
 }
 
 function renderWallpaper(dataUrl, fileName = '') {
@@ -1113,11 +1446,214 @@ function syncControls() {
     if (c.type === 'checkbox') c.checked = !!settings[c.dataset.setting]; else c.value = settings[c.dataset.setting];
   });
 }
+
+const FOCUS_TOPICS = [
+  ['Technology', [
+    ['programming', 'Programming'], ['ai', 'AI & machine learning'], ['data', 'Data & analytics'], ['security', 'Cybersecurity'], ['design', 'Design & creative'],
+  ]],
+  ['Career & business', [
+    ['work', 'Work & projects'], ['career', 'Career & job search'], ['marketing', 'Marketing'], ['sales', 'Sales & customers'], ['productivity', 'Productivity'],
+  ]],
+  ['Money & planning', [
+    ['finance', 'Finance & budgeting'], ['investing', 'Investing & markets'], ['shopping', 'Shopping & products'], ['realestate', 'Real estate'],
+  ]],
+  ['Knowledge', [
+    ['research', 'Research & papers'], ['learning', 'Learning & courses'], ['writing', 'Writing & editing'], ['news', 'News & current events'], ['legal', 'Legal & contracts'],
+  ]],
+  ['Everyday life', [
+    ['personal', 'Personal notes'], ['health', 'Health & wellness'], ['cooking', 'Food & cooking'], ['home', 'Home & DIY'], ['family', 'Family & caregiving'], ['travel', 'Travel & places'], ['entertainment', 'Books & entertainment'],
+  ]],
+];
+function renderFocusSettings() {
+  const tier = planInfo ? planInfo.tier : 'free';
+  const limit = planInfo && planInfo.limits ? planInfo.limits.focusTopics : 0;
+  const available = limit > 0;
+  const panel = document.querySelector('.focus-settings');
+  panel.dataset.tier = tier;
+  document.body.dataset.planTier = tier;
+  document.querySelector('.guide-pane').dataset.tier = tier;
+  const brandTier = $('brandTierBadge');
+  brandTier.hidden = tier === 'free';
+  brandTier.textContent = tier === 'max' ? 'MAX' : tier === 'pro' ? 'PRO' : '';
+  brandTier.dataset.tier = tier;
+  $('focusSettingsTier').textContent = tier === 'max' ? 'MAX · 16 TOPICS' : tier === 'pro' ? 'PRO · 8 TOPICS' : 'FREE';
+  $('focusSettingsControls').hidden = !available;
+  $('focusSettingsLocked').hidden = available;
+  $('focusTopicLimit').textContent = `Choose up to ${limit} topics, including custom topics you define.`;
+  const chosen = (Array.isArray(settings.focusTopics) ? settings.focusTopics : []).slice(0, limit);
+  const custom = (Array.isArray(settings.focusCustomTopics) ? settings.focusCustomTopics : []).slice(0, Math.max(0, limit - chosen.length));
+  const total = chosen.length + custom.length;
+  $('focusSelectedCount').textContent = `${total} / ${limit} selected`;
+  $('focusTopicGrid').innerHTML = FOCUS_TOPICS.map(([group, topics]) => `<section class="focus-topic-group"><h4>${group}</h4><div class="focus-topic-group-grid">${topics.map(([id, label]) => {
+    const checked = chosen.includes(id);
+    const disabled = !checked && total >= limit;
+    return `<label class="focus-topic"><input type="checkbox" value="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}/><span>${label}</span></label>`;
+  }).join('')}</div></section>`).join('');
+  $('focusCustomList').innerHTML = custom.map((topic) => `<span class="focus-custom-chip"><span><b>${escapeHtml(topic.label)}</b><small>${escapeHtml(topic.prompt)}</small></span><button type="button" data-remove-custom="${escapeHtml(topic.id)}" aria-label="Remove ${escapeHtml(topic.label)}" title="Remove custom topic">×</button></span>`).join('');
+  $('focusCustomAdd').disabled = total >= limit;
+  $('focusSetupHint').textContent = settings.focusCapture ? 'Automatic local filtering is on. Review clips stay here for 48 hours.' : total ? 'Your topics are ready. Turn on Focus Capture when you want automatic filtering.' : 'Choose at least one topic to turn on Focus Capture.';
+  $('focusEnableBtn').innerHTML = `<i data-i="${settings.focusCapture ? 'x' : 'sparkles'}"></i>${settings.focusCapture ? 'Pause Focus Capture' : 'Enable Focus Capture'}`;
+  hydrate($('focusEnableBtn'));
+  renderFocusModeToggles();
+}
+
+window.addEventListener('clipsync:focusSettings', (event) => {
+  const remote = event.detail || {};
+  if (!currentFocusSettingsUid || remote.uid !== currentFocusSettingsUid) return;
+  const remoteAt = Number(remote.updatedAt) || 0;
+  if (remoteAt < focusSettingsUpdatedAt) {
+    window.clipSync?.publishFocusSettings?.(focusSettingsData(), focusSettingsUpdatedAt);
+    return;
+  }
+  const validBuiltins = new Set(FOCUS_TOPICS.flatMap(([, topics]) => topics.map(([id]) => id)));
+  settings.focusCapture = !!remote.focusCapture;
+  settings.focusTopics = Array.isArray(remote.focusTopics) ? [...new Set(remote.focusTopics.filter((id) => validBuiltins.has(id)))] : [];
+  settings.focusCustomTopics = Array.isArray(remote.focusCustomTopics) ? remote.focusCustomTopics
+    .filter((topic) => topic && typeof topic.id === 'string' && typeof topic.label === 'string' && typeof topic.prompt === 'string')
+    .map((topic) => ({ id: topic.id.slice(0, 80), label: topic.label.slice(0, 40), prompt: topic.prompt.slice(0, 240) })) : [];
+  focusSettingsUpdatedAt = remoteAt;
+  lastFocusSettingsSig = focusSettingsSignature();
+  const cached = { ...focusSettingsData(), updatedAt: focusSettingsUpdatedAt };
+  try { localStorage.setItem(focusSettingsKey(currentFocusSettingsUid), JSON.stringify(cached)); } catch { /* remote copy remains available */ }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* remote copy remains available */ }
+  applySettings(); renderFocusSettings();
+});
+
+window.addEventListener('clipsync:profilePhoto', (event) => {
+  const remote = event.detail || {};
+  if (!currentProfileUid || remote.uid !== currentProfileUid) return;
+  const remoteAt = Number(remote.updatedAt) || 0;
+  let localPhoto = '';
+  try { localPhoto = localStorage.getItem(profilePhotoKey(currentProfileUid)) || ''; } catch { /* empty */ }
+  if (remoteAt < profilePhotoUpdatedAt) {
+    window.clipSync?.publishProfilePhoto?.(localPhoto, profilePhotoUpdatedAt);
+    return;
+  }
+  const photo = typeof remote.photoDataUrl === 'string' && remote.photoDataUrl.length <= 350000 ? remote.photoDataUrl : '';
+  try {
+    if (photo) localStorage.setItem(profilePhotoKey(currentProfileUid), photo);
+    else localStorage.removeItem(profilePhotoKey(currentProfileUid));
+    localStorage.setItem(profilePhotoTimeKey(currentProfileUid), String(remoteAt));
+  } catch { /* show the cloud copy for this session even if the cache is full */ }
+  profilePhotoUpdatedAt = remoteAt;
+  applyProfilePhoto(photo);
+});
+
+window.addEventListener('clipsync:sharedDataReady', (event) => {
+  const ready = event.detail || {};
+  if (!currentProfileUid || ready.uid !== currentProfileUid) return;
+  if (!ready.hasProfile) window.clipSync?.publishProfilePhoto?.(localStorage.getItem(profilePhotoKey(currentProfileUid)) || '', profilePhotoUpdatedAt || Date.now());
+  if (!ready.hasFocusSettings) window.clipSync?.publishFocusSettings?.(focusSettingsData(), focusSettingsUpdatedAt || Date.now());
+  else if (focusSettingsUpdatedAt > 0) window.clipSync?.publishFocusSettings?.(focusSettingsData(), focusSettingsUpdatedAt);
+});
+
+function renderFocusModeToggles() {
+  const tier = planInfo ? planInfo.tier : 'free';
+  const limit = planInfo && planInfo.limits ? planInfo.limits.focusTopics : 0;
+  const active = limit > 0 && !!settings.focusCapture;
+  const hasTopics = (settings.focusTopics || []).length + (settings.focusCustomTopics || []).length > 0;
+  document.querySelectorAll('[data-focus-toggle]').forEach((button) => {
+    button.classList.toggle('is-on', active);
+    button.classList.toggle('is-locked', tier === 'free');
+    button.setAttribute('aria-pressed', String(active));
+    button.setAttribute('aria-label', tier === 'free' ? 'AI Focus is a Pro feature' : `AI Focus is ${active ? 'on' : 'off'}`);
+    button.title = tier === 'free' ? 'AI Focus · Explore Pro' : active ? 'Turn AI Focus off' : hasTopics ? 'Turn AI Focus on' : 'Choose topics in Settings → Focus Capture';
+    const status = button.querySelector('[data-focus-status]');
+    if (status) status.textContent = tier === 'free' ? 'Pro' : active ? 'On' : 'Off';
+  });
+}
+
+async function toggleFocusMode() {
+  const next = !settings.focusCapture;
+  const result = await window.clipdows.setFocusCaptureEnabled(next);
+  if (!result || !result.ok) {
+    if (result && result.reason === 'plan') openSettings('focusCapture');
+    else {
+      showToast('Choose your topics first', 'Pick at least one topic in Focus Capture settings, then switch AI Focus on.');
+      openSettings('focusCapture');
+    }
+    return;
+  }
+  settings.focusCapture = next;
+  saveSettings();
+  applySettings();
+  renderFocusSettings();
+  showToast(next ? 'AI Focus is on' : 'AI Focus is off', next ? 'New text, code, and links will be matched against your topics on this PC.' : 'New clips will follow your normal capture behavior.');
+}
+
+document.querySelectorAll('[data-focus-toggle]').forEach((button) => button.addEventListener('click', toggleFocusMode));
+if (window.clipdows.onFocusCaptureChanged) window.clipdows.onFocusCaptureChanged((state) => {
+  if (typeof state.enabled === 'boolean' && settings.focusCapture !== state.enabled) {
+    settings.focusCapture = state.enabled;
+    saveSettings();
+    applySettings();
+  }
+  renderFocusModeToggles();
+  renderFocusSettings();
+});
+
+$('focusTopicGrid').addEventListener('change', (event) => {
+  const input = event.target;
+  if (input.type !== 'checkbox') return;
+  const limit = planInfo && planInfo.limits ? planInfo.limits.focusTopics : 0;
+  const chosen = (Array.isArray(settings.focusTopics) ? [...settings.focusTopics] : []).slice(0, limit);
+  const activeCustomCount = (settings.focusCustomTopics || []).slice(0, Math.max(0, limit - chosen.length)).length;
+  if (input.checked) {
+    if (chosen.length + activeCustomCount >= limit) { input.checked = false; return; }
+    chosen.push(input.value);
+  } else {
+    settings.focusTopics = chosen.filter((id) => id !== input.value);
+    saveSettings(); applySettings(); renderFocusSettings();
+    return;
+  }
+  settings.focusTopics = chosen;
+  saveSettings(); applySettings(); renderFocusSettings();
+});
+
+$('focusCustomAdd').addEventListener('click', () => {
+  const limit = planInfo && planInfo.limits ? planInfo.limits.focusTopics : 0;
+  const label = $('focusCustomName').value.trim();
+  const prompt = $('focusCustomDescription').value.trim();
+  const builtinCount = (settings.focusTopics || []).length;
+  if (!label || !prompt) { showToast('Add a name and description', 'A short description helps Focus Capture understand what belongs here.'); return; }
+  const activeBuiltinCount = Math.min(builtinCount, limit);
+  const activeCustomCount = Math.min((settings.focusCustomTopics || []).length, Math.max(0, limit - activeBuiltinCount));
+  if (activeBuiltinCount + activeCustomCount >= limit) { showToast('Topic limit reached', `Your ${planInfo.tier === 'max' ? 'Max' : 'Pro'} plan includes ${limit} total topics.`); return; }
+  settings.focusTopics = settings.focusTopics.slice(0, limit);
+  settings.focusCustomTopics = settings.focusCustomTopics.slice(0, Math.max(0, limit - settings.focusTopics.length));
+  settings.focusCustomTopics.push({ id: `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, label: label.slice(0, 40), prompt: prompt.slice(0, 240) });
+  $('focusCustomName').value = '';
+  $('focusCustomDescription').value = '';
+  saveSettings(); applySettings(); renderFocusSettings();
+});
+$('focusCustomList').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-remove-custom]');
+  if (!button) return;
+  settings.focusCustomTopics = (settings.focusCustomTopics || []).filter((topic) => topic.id !== button.dataset.removeCustom);
+  saveSettings(); applySettings(); renderFocusSettings();
+});
+
+$('focusEnableBtn').addEventListener('click', () => {
+  const limit = planInfo && planInfo.limits ? planInfo.limits.focusTopics : 0;
+  if (!limit) { openSettings('pricing'); return; }
+  if (!settings.focusCapture && !(settings.focusTopics || []).length && !(settings.focusCustomTopics || []).length) {
+    showToast('Choose a topic first', 'Focus Capture needs at least one topic to get started.');
+    return;
+  }
+  settings.focusCapture = !settings.focusCapture;
+  saveSettings(); applySettings(); renderFocusSettings();
+  showToast(settings.focusCapture ? 'Focus Capture is on' : 'Focus Capture is paused', settings.focusCapture ? 'New matching clips will be saved. Other clips will wait in Focus Review.' : 'New clips will follow your normal capture behavior.');
+});
+$('focusPlansBtn').addEventListener('click', () => openSettings('pricing'));
+$('focusUpgradeBtn').addEventListener('click', () => openSettings('pricing'));
+
+if (window.clipdows.onFocusReviewOpen) window.clipdows.onFocusReviewOpen(() => setType('focusReview'));
 darkMq.addEventListener('change', () => { if (settings.theme === 'system') applySettings(); });
 
-const PANE_TITLES = { general: 'General', pricing: 'Pricing', referral: 'Referral', shortcuts: 'Shortcuts', sync: 'Sync & Devices', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
+const PANE_TITLES = { general: 'General', pricing: 'Pricing', referral: 'Referral', shortcuts: 'Shortcuts', sync: 'Sync & Devices', focusCapture: 'Focus Capture', guide: 'ClipDows Guide', privacy: 'Privacy', appearance: 'Appearance', advanced: 'Advanced' };
 function openSettings(pane = 'general') {
   syncControls();
+  renderFocusSettings();
   document.querySelectorAll('.set-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.pane === pane));
   document.querySelectorAll('.set-pane').forEach((p) => { p.hidden = p.dataset.pane !== pane; });
   $('setHeading').textContent = PANE_TITLES[pane];
@@ -1188,6 +1724,69 @@ function renderStoreUpdateState(result = {}) {
     storeUpdateButton.disabled = false;
   }
 }
+
+function renderFocusReview() {
+  const tier = planInfo ? planInfo.tier : 'free';
+  const canFocus = !!(planInfo && planInfo.limits && planInfo.limits.focusTopics > 0);
+  focusReviewView.dataset.tier = tier;
+  document.body.dataset.planTier = tier;
+  $('focusFreeCard').hidden = canFocus;
+  $('focusUpgradeBtn').textContent = tier === 'free' ? 'Explore Pro' : 'Explore plans';
+  $('focusHeroText').textContent = canFocus
+    ? 'Clips outside your topics wait here for 48 hours. Keep anything you need before it expires.'
+    : 'Focus Capture is available with Pro and Max. Your current clipboard history keeps working as usual.';
+  $('focusHeroTitle').innerHTML = tier === 'max' ? 'Your clipboard,<br /><span>in its prime.</span>' : tier === 'pro' ? 'Keep the signal.<br /><span>Move with focus.</span>' : 'Keep the signal.<br /><span>Review the rest.</span>';
+  $('focusEyebrow').textContent = tier === 'max' ? 'MAXIMUM FOCUS · ON-DEVICE AI' : tier === 'pro' ? 'PRO FOCUS · MADE PERSONAL' : 'LOCAL CLIPBOARD FILTER';
+  $('focusPlanPill').textContent = tier === 'max' ? 'Max · 16 topics' : tier === 'pro' ? 'Pro · 8 topics' : 'Available with Pro';
+  $('focusQueueSub').textContent = focusReviewItems.length
+    ? 'Only you can review these local clips. Kept clips then follow your normal sync settings.'
+    : 'Nothing is sent to cloud sync until you keep it.';
+
+  const q = currentSearch.toLowerCase();
+  const rows = focusReviewItems.filter((row) => !q || `${row.content} ${row.preview} ${row.source_app || ''}`.toLowerCase().includes(q));
+  focusReviewGrid.innerHTML = rows.map((row) => {
+    const hours = Math.max(0, Math.ceil((row.expires_at - Date.now()) / 3600000));
+    const remaining = hours >= 24 ? `${Math.ceil(hours / 24)}d left` : hours > 0 ? `${hours}h left` : 'Expiring now';
+    const preview = String(row.content || '').slice(0, 2200);
+    return `<article class="focus-review-card" data-review-id="${escapeHtml(row.id)}">
+      <div class="focus-card-head"><span class="focus-card-kind">${escapeHtml(row.type || 'text')}</span><span class="focus-card-time">${remaining}</span></div>
+      <div class="focus-card-preview">${escapeHtml(preview)}${row.content.length > 2200 ? '…' : ''}</div>
+      ${row.source_app ? `<div class="focus-card-source">Copied from ${escapeHtml(row.source_app)}</div>` : ''}
+      <div class="focus-card-actions"><button class="primary-btn" data-review-action="keep" data-review-id="${escapeHtml(row.id)}"><i data-i="check"></i>Keep in history</button><button class="ghost-btn danger" data-review-action="delete" data-review-id="${escapeHtml(row.id)}">Delete now</button></div>
+    </article>`;
+  }).join('');
+  hydrate(focusReviewGrid);
+  $('focusEmpty').hidden = !canFocus || rows.length > 0 || focusReviewItems.length > 0;
+  if (!rows.length && focusReviewItems.length && q) {
+    $('focusEmpty').hidden = false;
+    $('focusEmpty').querySelector('b').textContent = 'No matching clips';
+    $('focusEmpty').querySelector('span:last-child').textContent = 'Try another search to find a clip in your review queue.';
+  } else if (!rows.length && canFocus && !focusReviewItems.length) {
+    $('focusEmpty').hidden = false;
+    $('focusEmpty').querySelector('b').textContent = 'You’re all caught up';
+    $('focusEmpty').querySelector('span:last-child').textContent = 'Clips that don’t match your topics will show here for two days.';
+  }
+}
+
+focusReviewGrid.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-review-action]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    if (button.dataset.reviewAction === 'keep') {
+      const result = await window.clipdows.keepFocusReviewItem(button.dataset.reviewId);
+      if (!result || !result.ok) throw new Error('That clip could not be saved.');
+      showToast('Clip kept', 'It is now in your normal clipboard history.');
+    } else {
+      await window.clipdows.deleteFocusReviewItem(button.dataset.reviewId);
+      showToast('Clip deleted');
+    }
+    await refresh();
+  } catch (err) {
+    button.disabled = false;
+    showToast('Could not update clip', err.message || 'Please try again.');
+  }
+});
 
 if (window.clipdows.onStoreUpdateState) window.clipdows.onStoreUpdateState(renderStoreUpdateState);
 if (window.clipdows.isStorePackage) {
@@ -1455,6 +2054,7 @@ applySettings();
 syncControls();
 setViewMode(settings.view, false);
 window.clipdows.onItemsUpdated(() => refresh());
+if (window.clipdows.onFocusReviewChanged) window.clipdows.onFocusReviewChanged(() => refresh());
 refresh();
 // ---------- end-to-end encryption UI ----------
 window.clipVaultPrompt = (mode, err) => new Promise((resolve) => {

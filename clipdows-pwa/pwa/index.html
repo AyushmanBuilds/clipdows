@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ClipDows</title>
+<link rel="manifest" href="/manifest.json" />
+<link rel="stylesheet" href="/style.css?v=2026100702" />
+<meta name="theme-color" content="#0E0F15" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" />
+<script>try{var s=JSON.parse(localStorage.getItem("clipdows.settings")||"{}");document.documentElement.dataset.theme=s.theme||"auto";document.documentElement.dataset.accent=s.accent||"violet";document.documentElement.dataset.compact=s.compact?"1":"0";}catch(e){}</script>
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<script>
+  window.__deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.__deferredInstallPrompt = e;
+    window.dispatchEvent(new CustomEvent('clipdows:installable'));
+  });
+  window.addEventListener('appinstalled', () => {
+    window.__deferredInstallPrompt = null;
+    window.dispatchEvent(new CustomEvent('clipdows:installed'));
+  });
+</script>
+</head>
+<body>
+
+  <!-- ===== Not paired yet ===== -->
+  <div class="center-view" id="unpairedView" hidden>
+    <div class="pair-card">
+      <div class="brand"><img class="brand-mark" src="/icon-192.png" alt="" /><span>ClipDows</span></div>
+      <h1>Connect to your PC</h1>
+      <p>Open ClipDows on your Windows PC → click the devices icon 💻 → <strong>Add Device</strong>, then scan the QR code with this phone. Already have a code?</p>
+      <input class="pair-input" id="manualCode" maxlength="6" placeholder="ABC123" />
+      <button class="primary-btn" id="manualPairBtn">Pair with code</button>
+      <div class="pair-status" id="unpairedStatus"></div>
+    </div>
+  </div>
+
+  <!-- ===== Main app ===== -->
+  <div class="shell" id="appShell" hidden>
+    <div class="topbar">
+      <div class="brand"><img class="brand-mark" src="/icon-192.png" alt="" /><span>ClipDows</span></div>
+      <div class="sync-pill" id="syncPill"><span class="dot"></span><span id="syncLabel">Synced</span></div>
+      <button class="focus-header-toggle" id="focusHeaderToggle" type="button" aria-pressed="false" aria-label="AI Focus is off" title="Toggle AI Focus"><span class="focus-header-spark">✦</span><span class="focus-header-copy"><strong>AI Focus</strong><small data-header-focus-status>Off</small></span><span class="focus-header-switch" aria-hidden="true"><i></i></span></button>
+      <button class="icon-btn" id="captureBtn" title="Capture what you just copied" aria-label="Capture clipboard"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
+    </div>
+
+    <!-- ===== Feed view ===== -->
+    <div id="feedView">
+      <div class="composer">
+        <div class="composer-row">
+          <textarea class="composer-input" id="textInput" rows="1" placeholder="Type or paste something to send to your PC…"></textarea>
+          <div class="composer-actions">
+            <button class="attach-btn" id="attachBtn" title="Attach image or text file" aria-label="Attach"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 8"/></svg></button>
+            <button class="send-btn" id="sendBtn" title="Send to PC" aria-label="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          </div>
+        </div>
+        <div class="attach-preview" id="attachPreview"></div>
+        <div class="composer-hint">Phone clipboard capture depends on browser permission and may only work when ClipDows opens or you tap ⚡. Browsers do not allow continuous background clipboard monitoring. PC copies appear here live.</div>
+        <input type="file" id="fileInput" accept="image/*,.txt,text/plain" multiple hidden />
+      </div>
+
+      <div class="shared-banner" id="sharedBanner" hidden>
+        <strong>Shared from another app</strong>
+        <div class="shared-list" id="sharedList"></div>
+        <div class="shared-actions">
+          <button class="card-action" id="sharedSendAll">Send all to PC</button>
+          <button class="card-action danger" id="sharedDismiss">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="install-banner" id="installBanner" hidden>
+        <img src="/icon-192.png" alt="" />
+        <div class="txt"><strong>Install ClipDows</strong><span>Get instant Share-to-PC support</span></div>
+        <button id="installBannerBtn">Install</button>
+        <button class="dismiss" id="installBannerDismiss">✕</button>
+      </div>
+
+      <div class="install-banner push-banner" id="pushBanner" hidden>
+        <div class="txt"><strong>Get notified instantly</strong><span>Know the moment something's copied on your PC</span></div>
+        <button id="pushBannerBtn">Enable</button>
+        <button class="dismiss" id="pushBannerDismiss">✕</button>
+      </div>
+
+      <div class="feed" id="feed">
+        <div class="feed-section-title" id="pinnedTitle" hidden>📌 Pinned</div>
+        <div class="grid" id="pinnedGrid"></div>
+        <div class="feed-section-title">Recent</div>
+        <div class="grid" id="itemsGrid"></div>
+        <div class="empty-state" id="emptyState" hidden>
+          <div class="empty-icon">📋</div>
+          <p>Nothing synced yet</p>
+          <span>Copy something on your PC, or send something from here — it'll show up instantly on both.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Snippets / tools view ===== -->
+    <div id="toolsView" hidden><div class="settings-body"><div id="toolsMount"></div></div></div>
+
+    <!-- ===== Settings view ===== -->
+    <div id="settingsView" hidden>
+      <div class="settings-body">
+        <div class="seg settings-seg" id="settingsSeg"><button data-pane="general" class="on">Settings</button><button data-pane="pricing">Pricing</button></div>
+        <div id="generalPane">
+        <div class="settings-group">
+          <h4>This connection</h4>
+          <div class="device-chip">
+            <div class="avatar" id="deviceAvatar">A</div>
+            <div>
+              <div class="name" id="deviceName">Android phone</div>
+              <div class="sub">Paired device</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h4>General</h4>
+          <div class="settings-row">
+            <span class="label">Live sync</span>
+            <span class="value">Always on</span>
+          </div>
+          <div class="settings-row">
+            <span class="label">Item history</span>
+            <span class="value" id="histRow">Last 60 items</span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h4>Share from other apps</h4>
+          <div class="settings-row">
+            <span class="label">Appears in Android's Share sheet as</span>
+            <span class="value">ClipDows</span>
+          </div>
+        </div>
+
+        <div id="prefsMount"></div>
+        <div id="profileMount"></div>
+        <div id="focusMount"></div>
+        <div class="settings-group">
+          <h4>ClipDows Guide</h4>
+          <div class="settings-row tap" id="restartGuide"><span><span class="label">Show the guide</span><small>Take a quick tour of ClipDows on this device</small></span><span class="value">›</span></div>
+        </div>
+
+        <button class="ghost-btn" id="unpairBtn">Unpair this phone</button>
+        </div>
+        <div id="pricingPane" hidden><div id="pricingMount"></div></div>
+      </div>
+    </div>
+
+    <div class="bottom-nav">
+      <button class="nav-tab active" data-tab="feedView"><span class="nav-tab-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="3"/><path d="M9 4V3h6v1M9 10h6M9 14h4"/></svg></span>Feed</button>
+      <button class="nav-tab" data-tab="toolsView"><span class="nav-tab-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8L3.5 9.7l5.9-.9z"/></svg></span>Snippets</button>
+      <button class="nav-tab" data-tab="settingsView"><span class="nav-tab-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></span>Settings</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden>
+    <div class="toast-icon">📎</div>
+    <div>
+      <div class="toast-title" id="toastTitle">Sent to PC</div>
+      <div class="toast-sub" id="toastSub"></div>
+    </div>
+  </div>
+
+  <div class="install-overlay" id="installOverlay" hidden>
+    <div class="install-card">
+      <img src="/icon-192.png" alt="" />
+      <h2 id="installTitle">Install ClipDows</h2>
+      <p id="installDesc">Add it to your home screen so it opens like a real app — and so it shows up instantly when you share a photo or file from anywhere on your phone.</p>
+      <ol class="install-steps" id="installSteps" hidden></ol>
+      <div class="install-actions">
+        <button class="primary-btn" id="installNowBtn">Install</button>
+        <button class="install-skip" id="installSkipBtn">Not now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== QR-to-share: beam a text/link clip to any camera, no cloud round-trip ===== -->
+  <div class="qr-overlay" id="qrOverlay" hidden>
+    <div class="qr-card">
+      <button class="qr-close" id="qrCloseBtn" aria-label="Close">✕</button>
+      <div class="qr-frame"><div class="qr-code" id="qrCodeMount"></div></div>
+      <div class="qr-caption" id="qrCaption"></div>
+      <div class="qr-hint">Scan with any phone's camera — this goes straight from screen to camera, no internet needed.</div>
+    </div>
+  </div>
+
+  <div class="guide-overlay" id="guideOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+    <div class="guide-card"><div class="guide-step" id="guideStep"></div><h2 id="guideTitle">Welcome to ClipDows</h2><p id="guideText"></p><div class="guide-actions"><button class="ghost-btn" id="guideSkip">Skip</button><button class="primary-btn" id="guideNext">Next</button></div></div>
+  </div>
+
+  <script src="/qrcode.lib.js?v=20260924110844"></script>
+  <script type="module" src="/app.js?v=2026100702"></script>
+  <script type="module" src="/premium.js?v=2026100702"></script>
+  <script type="module" src="/focus.js?v=2026100702"></script>
+  <script defer src="/privacy-note.js"></script>
+  <script type="module">
+    const A = () => window.ClipDowsApp;
+
+    const unpairedView = document.getElementById('unpairedView');
+    const appShell = document.getElementById('appShell');
+    const feed = document.getElementById('feed');
+    const pinnedGrid = document.getElementById('pinnedGrid');
+    const pinnedTitle = document.getElementById('pinnedTitle');
+    const itemsGrid = document.getElementById('itemsGrid');
+    const emptyState = document.getElementById('emptyState');
+    const textInput = document.getElementById('textInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
+    const attachPreview = document.getElementById('attachPreview');
+    const syncPill = document.getElementById('syncPill');
+    const syncLabel = document.getElementById('syncLabel');
+    const toast = document.getElementById('toast');
+    const toastTitle = document.getElementById('toastTitle');
+    const toastSub = document.getElementById('toastSub');
+
+    const ICONS = { text: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg>', link: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>', image: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="3"/><circle cx="9" cy="10.5" r="1.6"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5"/></svg>', code: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>', file: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M14 3.5V8h4"/></svg>', snippet: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8L3.5 9.7l5.9-.9z"/></svg>' };
+    let pendingFiles = []; // File objects staged in the composer, not yet sent
+    let toastTimer;
+
+    function showToast(title, sub) {
+      toastTitle.textContent = title;
+      toastSub.textContent = sub || '';
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.hidden = true; }, 2400);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function safeSrc(src) {
+      // Only ever render image data URLs, and escape them for the attribute.
+      return /^data:image\//i.test(String(src || '')) ? escapeHtml(src) : '';
+    }
+
+    function isTextFile(f) {
+      return f && (f.type === 'text/plain' || /\.txt$/i.test(f.name || ''));
+    }
+
+    function timeAgo(ts) {
+      const diff = Math.max(0, Date.now() - (ts || Date.now()));
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'Just now';
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      return `${Math.floor(h / 24)}d ago`;
+    }
+
+    function deviceLabel(item) {
+      if (item.source && item.source.startsWith('desktop:')) return 'PC';
+      if (item.source && item.source.startsWith('phone:')) return item.deviceName || 'Phone';
+      return '';
+    }
+
+    function cardIcon(item) {
+      if (item.type === 'image') return `<div class="card-icon type-image"><img src="${safeSrc(item.content)}" /></div>`;
+      return `<div class="card-icon type-${item.type}">${ICONS[item.type] || ICONS.text}</div>`;
+    }
+
+    async function copyItem(item) {
+      try {
+        if (item.type === 'image') {
+          const res = await fetch(item.content);
+          const blob = await res.blob();
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        } else {
+          await navigator.clipboard.writeText(item.content);
+        }
+        showToast('Copied', 'Ready to paste on this phone');
+      } catch (err) {
+        // Clipboard image writes aren't supported on every Android browser yet.
+        if (item.type !== 'image') { showToast('Copy failed', 'Try again'); return; }
+        showToast('Can\u2019t auto-copy image', 'Long-press the image above to save it');
+      }
+    }
+
+    async function downloadImage(item) {
+      try {
+        const blob = await (await fetch(item.content)).blob();
+        let ext = (blob.type.split('/')[1] || 'png').replace(/\+.*$/, '');
+        if (ext === 'jpeg') ext = 'jpg';
+        const d = new Date(item.created_at || Date.now());
+        const p2 = (n) => String(n).padStart(2, '0');
+        const name = `ClipDows-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.${ext}`;
+        const ios = A().isIos && A().isIos();
+        if (ios && navigator.canShare) {
+          // iPhones can't drop files into Downloads from a web app; the share sheet offers "Save Image".
+          const file = new File([blob], name, { type: blob.type });
+          if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name; a.style.display = 'none';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        showToast('Downloading image', name);
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // user closed the share sheet
+        showToast('Download failed', 'Long-press the image to save it');
+      }
+    }
+
+    function renderCard(item) {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.dataset.id = String(item.id || '');
+      const source = deviceLabel(item);
+      const metaBits = [`<span>${timeAgo(item.created_at)}</span>`];
+      if (source) metaBits.push(`<span class="card-source">${escapeHtml(source)}</span>`);
+      if (item.char_count) metaBits.push(`<span>${item.char_count} chars</span>`);
+
+      if (item.type === 'image') {
+        el.innerHTML = `
+          <div class="card-top">${cardIcon(item)}<span></span></div>
+          <div class="card-image-preview"><img src="${safeSrc(item.content)}" /></div>
+          <div class="card-meta">${metaBits.join('')}</div>
+          <div class="card-row-actions"><button class="card-action" data-act="copy">Copy again</button><button class="card-action" data-act="download">Download</button></div>
+        `;
+      } else {
+        const previewClass = item.type === 'code' ? 'card-preview mono' : 'card-preview';
+        el.innerHTML = `
+          <div class="card-top">${cardIcon(item)}<span></span></div>
+          <div class="${previewClass}">${escapeHtml(item.preview || item.content || '')}</div>
+          <div class="card-meta">${metaBits.join('')}</div>
+          <div class="card-row-actions"><button class="card-action" data-act="copy">Copy again</button></div>
+        `;
+      }
+      if (window.CDX) window.CDX.enhanceCard(el, item);
+      el.querySelector('[data-act="copy"]').addEventListener('click', () => copyItem(item));
+      const dl = el.querySelector('[data-act="download"]');
+      if (dl) dl.addEventListener('click', () => downloadImage(item));
+      return el;
+    }
+
+    function renderItems(items) {
+      const pinned = items.filter((i) => i.pinned);
+      const rest = items.filter((i) => !i.pinned);
+      pinnedGrid.innerHTML = '';
+      itemsGrid.innerHTML = '';
+      pinnedTitle.hidden = pinned.length === 0;
+      pinned.forEach((i) => pinnedGrid.appendChild(renderCard(i)));
+      rest.forEach((i) => itemsGrid.appendChild(renderCard(i)));
+      emptyState.hidden = items.length > 0;
+    }
+
+    function updatePendingPreview() {
+      attachPreview.innerHTML = '';
+      pendingFiles.forEach((file, idx) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'attach-thumb';
+        if (file.type.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(file);
+          thumb.appendChild(img);
+        } else {
+          thumb.textContent = '📄';
+          thumb.style.display = 'flex';
+          thumb.style.alignItems = 'center';
+          thumb.style.justifyContent = 'center';
+          thumb.style.fontSize = '22px';
+        }
+        const rm = document.createElement('button');
+        rm.className = 'remove';
+        rm.textContent = '✕';
+        rm.addEventListener('click', () => { pendingFiles.splice(idx, 1); updatePendingPreview(); });
+        thumb.appendChild(rm);
+        attachPreview.appendChild(thumb);
+      });
+    }
+
+    async function sendComposer() {
+      if (sendBtn.disabled) return; // ignore Enter + tap firing together
+      const text = textInput.value.trim();
+      if (!text && pendingFiles.length === 0) return;
+      sendBtn.disabled = true;
+      try {
+        let skipped = 0;
+        for (const file of pendingFiles) {
+          if (file.type.startsWith('image/')) {
+            await A().pushImageItem(await A().prepareImage(file));
+          } else if (isTextFile(file)) {
+            await A().pushTextItem(await file.text());
+          } else {
+            skipped++;
+          }
+        }
+        if (text) await A().pushTextItem(text);
+        textInput.value = '';
+        pendingFiles = [];
+        updatePendingPreview();
+        showToast('Sent to PC', skipped ? skipped + ' file(s) skipped \u2014 only images and text are supported' : 'It will appear on your desktop instantly');
+      } catch (err) {
+        showToast('Couldn\u2019t send', err.message || 'Check your connection');
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      pendingFiles = pendingFiles.concat(Array.from(fileInput.files || []));
+      fileInput.value = '';
+      updatePendingPreview();
+    });
+    sendBtn.addEventListener('click', sendComposer);
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComposer(); }
+    });
+    // Best-effort: on Android Chrome, an in-app paste of a copied image can
+    // sometimes be read directly — falls back silently where unsupported.
+    textInput.addEventListener('paste', async (e) => {
+      const imgItem = Array.from(e.clipboardData?.items || []).find((i) => i.type.startsWith('image/'));
+      if (imgItem) {
+        e.preventDefault();
+        const file = imgItem.getAsFile();
+        if (file) { pendingFiles.push(file); updatePendingPreview(); }
+      }
+    });
+
+    // ---------- Tabs ----------
+    const TAB_VIEWS = ['feedView', 'toolsView', 'settingsView'];
+    function showTab(id) {
+      document.querySelectorAll('.nav-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
+      TAB_VIEWS.forEach((v) => { document.getElementById(v).hidden = v !== id; });
+      window.scrollTo({ top: 0 });
+    }
+    window.__showTab = showTab;
+    document.querySelectorAll('.nav-tab').forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+
+    // ---------- Settings ----------
+    document.getElementById('unpairBtn').addEventListener('click', async () => {
+      if (!confirm('Unpair this phone from ClipDows? You can pair again anytime from your PC.')) return;
+      await A().unpairDevice();
+      location.href = '/index.html';
+    });
+
+    // ---------- Shared-from-Android banner ----------
+    async function loadSharedInbox() {
+      const banner = document.getElementById('sharedBanner');
+      const list = document.getElementById('sharedList');
+      const pending = await A().getPendingShares();
+      if (!pending.length) { banner.hidden = true; return; }
+      banner.hidden = false;
+      document.getElementById('sharedSendAll').disabled = false;
+      list.innerHTML = '';
+      pending.forEach((entry) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'shared-item-thumb';
+        if (entry.kind === 'file' && entry.mime && entry.mime.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(entry.blob);
+          thumb.appendChild(img);
+        } else if (entry.kind === 'file') {
+          thumb.textContent = '📄';
+        } else {
+          thumb.textContent = '📝';
+        }
+        list.appendChild(thumb);
+      });
+
+      document.getElementById('sharedSendAll').onclick = async () => {
+        const sendBtnAll = document.getElementById('sharedSendAll');
+        if (sendBtnAll.disabled) return; // stop double-tap sending everything twice
+        sendBtnAll.disabled = true;
+        let skipped = 0;
+        try {
+          for (const entry of pending) {
+            if (entry.kind === 'file' && entry.mime.startsWith('image/')) {
+              await A().pushImageItem(await A().prepareImage(entry.blob));
+            } else if (entry.kind === 'file' && (entry.mime === 'text/plain' || /\.txt$/i.test(entry.name || ''))) {
+              await A().pushTextItem(await entry.blob.text());
+            } else if (entry.kind === 'text') {
+              await A().pushTextItem(entry.text);
+            } else {
+              skipped++;
+            }
+            await A().deletePendingShare(entry.id);
+          }
+          banner.hidden = true;
+          showToast('Sent to PC', skipped ? skipped + ' file(s) skipped \u2014 only images and text are supported' : 'Shared item delivered');
+        } catch (err) {
+          sendBtnAll.disabled = false;
+          showToast('Couldn\u2019t send', err.message || 'Try again');
+        }
+      };
+      document.getElementById('sharedDismiss').onclick = async () => {
+        for (const entry of pending) await A().deletePendingShare(entry.id);
+        banner.hidden = true;
+      };
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    // ---------- Install-as-app banner ----------
+    const DISMISS_KEY = 'clipdows.installDismissedAt';
+    const DISMISS_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000; // don't nag again for 3 days
+
+    function maybeShowInstallBanner() {
+      const A2 = window.ClipDowsApp;
+      const banner = document.getElementById('installBanner');
+      if (A2.isStandalone()) { banner.hidden = true; return; }
+      const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) || 0);
+      if (Date.now() - dismissedAt < DISMISS_SNOOZE_MS) { banner.hidden = true; return; }
+      if (!A2.isIos() && !A2.canPromptInstall()) { banner.hidden = true; return; }
+      banner.hidden = false;
+    }
+
+    document.getElementById('installBannerDismiss').addEventListener('click', () => {
+      localStorage.setItem(DISMISS_KEY, String(Date.now()));
+      document.getElementById('installBanner').hidden = true;
+    });
+
+    document.getElementById('installBannerBtn').addEventListener('click', () => {
+      const A2 = window.ClipDowsApp;
+      const overlay = document.getElementById('installOverlay');
+      const stepsEl = document.getElementById('installSteps');
+      const descEl2 = document.getElementById('installDesc');
+      const installBtn = document.getElementById('installNowBtn');
+      const skipBtn = document.getElementById('installSkipBtn');
+
+      if (A2.isIos()) {
+        descEl2.textContent = 'iPhones don\u2019t let apps install themselves — it takes two taps:';
+        stepsEl.hidden = false;
+        stepsEl.innerHTML = '<li>Tap the <strong>Share</strong> icon at the bottom of Safari</li><li>Scroll down and tap <strong>Add to Home Screen</strong></li>';
+        installBtn.textContent = 'Got it';
+        installBtn.onclick = () => { overlay.hidden = true; };
+        skipBtn.onclick = () => { overlay.hidden = true; };
+        overlay.hidden = false;
+        return;
+      }
+
+      installBtn.textContent = 'Install';
+      installBtn.onclick = async () => {
+        installBtn.disabled = true;
+        await A2.promptInstall();
+        installBtn.disabled = false;
+        overlay.hidden = true;
+        document.getElementById('installBanner').hidden = true;
+      };
+      skipBtn.onclick = () => { overlay.hidden = true; };
+      overlay.hidden = false;
+    });
+
+    window.addEventListener('clipdows:installable', maybeShowInstallBanner);
+    window.addEventListener('clipdows:installed', () => { document.getElementById('installBanner').hidden = true; });
+
+    // ---------- Push-notification nudge banner ----------
+    const PUSH_DISMISS_KEY = 'clipdows.pushDismissedAt';
+    const PUSH_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
+
+    function maybeShowPushBanner() {
+      const A2 = window.ClipDowsApp;
+      const banner = document.getElementById('pushBanner');
+      if (!banner) return;
+      if (!A2.pushSupported() || A2.isPushEnabled() || A2.pushPermission() === 'denied') { banner.hidden = true; return; }
+      if (A2.isIos() && !A2.isStandalone()) { banner.hidden = true; return; } // iOS needs the installed app first
+      const dismissedAt = Number(localStorage.getItem(PUSH_DISMISS_KEY) || 0);
+      if (Date.now() - dismissedAt < PUSH_SNOOZE_MS) { banner.hidden = true; return; }
+      banner.hidden = false;
+    }
+    document.getElementById('pushBannerDismiss').addEventListener('click', () => {
+      localStorage.setItem(PUSH_DISMISS_KEY, String(Date.now()));
+      document.getElementById('pushBanner').hidden = true;
+    });
+    document.getElementById('pushBannerBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('pushBannerBtn');
+      btn.disabled = true;
+      try {
+        await A().enablePush();
+        showToast('Notifications on', 'You\u2019ll be alerted when your PC copies something');
+        document.getElementById('pushBanner').hidden = true;
+      } catch (err) {
+        showToast('Couldn\u2019t enable', err.message || 'Try again');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // ---------- Live sync (auto-retries: the listener dies on permission-denied,
+    // which happens briefly right after pairing until the PC finishes the handshake) ----------
+    let stopWatch = null, watchFails = 0, watchTimer, rawItems = [];
+    function startWatching() {
+      if (stopWatch) { stopWatch(); stopWatch = null; }
+      clearTimeout(watchTimer);
+      stopWatch = A().watchItems(
+        (items) => { rawItems = items; watchFails = 0; const d = window.CDX ? window.CDX.dedupe(items) : items; renderItems(d); if (window.CDX) window.CDX.onFeed(d); syncPill.classList.remove('offline'); syncLabel.textContent = 'Synced'; },
+        () => {
+          watchFails++;
+          syncPill.classList.add('offline');
+          syncLabel.textContent = watchFails > 8 ? 'Not linked \u2014 re-pair in Settings' : 'Reconnecting\u2026';
+          watchTimer = setTimeout(startWatching, Math.min(3000 * watchFails, 15000));
+        }
+      );
+    }
+    window.addEventListener('online', () => { if (A() && A().getPairing()) startWatching(); });
+    // Hooks used by premium.js: restart the listener (plan cap / unlock changed) or redraw with the current plan rules (pins, history window).
+    window.__restartWatch = () => startWatching();
+    window.__rerender = () => { if (!window.CDX || !rawItems.length) return; const d = window.CDX.dedupe(rawItems); renderItems(d); window.CDX.onFeed(d); window.CDX.applyFilter(); };
+
+    // ---------- Boot ----------
+    async function boot() {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+      }
+
+      try {
+        await window.clipdowsWaitReady();
+      } catch (err) {
+        syncPill.classList.add('offline');
+        syncLabel.textContent = 'Offline';
+        showToast('Couldn\u2019t connect', err.message || 'Check your internet connection and reload');
+        // Still show whichever screen applies so the UI isn't blank; actions will just fail gracefully.
+      }
+
+      const pairing = A().getPairing();
+      if (!pairing) {
+        unpairedView.hidden = false;
+        return;
+      }
+
+      appShell.hidden = false;
+      document.getElementById('deviceName').textContent = pairing.deviceName || 'This phone';
+      document.getElementById('deviceAvatar').textContent = (pairing.deviceName || 'A')[0].toUpperCase();
+      window.ClipDowsFocus?.applyProfilePhoto?.();
+
+      try {
+        const uid = await A().ensureAnonAuth();
+        if (uid !== pairing.phoneUid) {
+          // Anonymous session was reset (site data cleared) \u2014 the old pairing can't work anymore.
+          A().clearPairing();
+          location.reload();
+          return;
+        }
+        A().watchPlan();
+        const cs = await A().initCrypto();
+        startWatching();
+        if (cs.state !== 'ready' && cs.state !== 'none' && window.CDX) window.CDX.needUnlock(cs, startWatching);
+      } catch {
+        syncPill.classList.add('offline');
+        syncLabel.textContent = 'Offline';
+      }
+
+      maybeShowInstallBanner(); // covers the case where beforeinstallprompt already fired before we attached the listener
+      maybeShowPushBanner();
+
+      if (new URLSearchParams(location.search).get('shared') === '1') {
+        loadSharedInbox();
+      } else {
+        // still show any shares queued from a previous session that weren't sent
+        loadSharedInbox();
+      }
+    }
+
+    document.getElementById('manualPairBtn').addEventListener('click', async () => {
+      const status = document.getElementById('unpairedStatus');
+      const btn = document.getElementById('manualPairBtn');
+      const code = document.getElementById('manualCode').value;
+      status.className = 'pair-status';
+      status.textContent = 'Connecting…';
+      btn.disabled = true;
+      try {
+        await window.clipdowsWaitReady();
+        await A().claimPairingCode(code, guessDeviceName());
+        location.reload();
+      } catch (err) {
+        status.className = 'pair-status error';
+        status.textContent = err.message || 'Could not pair.';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    function guessDeviceName() {
+      const m = navigator.userAgent.match(/;\s*([^;)]+)\)\s*AppleWebKit/);
+      return (m && m[1]) ? m[1].trim() : 'Android phone';
+    }
+
+    window.addEventListener('DOMContentLoaded', boot);
+  </script>
+</body>
+</html>

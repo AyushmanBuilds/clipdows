@@ -1,0 +1,4 @@
+onnx-community/all-MiniLM-L6-v2-ONNX
+Revision: aff7a1d
+License: Apache-2.0
+Model card: https://huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX
